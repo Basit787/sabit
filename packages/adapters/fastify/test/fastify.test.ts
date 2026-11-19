@@ -64,7 +64,7 @@ describe("fastify adapter", () => {
     expect(response.json()).toEqual({ custom: true });
   });
 
-  it("sends unexpected errors to Fastify's error handler", async () => {
+  it("answers unexpected errors with a plain 500 and reports them to onError", async () => {
     const routes = await resolveRoutes({
       routes: [
         source("crash.ts", {
@@ -74,13 +74,12 @@ describe("fastify adapter", () => {
         }),
       ],
     });
+    const seen: unknown[] = [];
     const app = Fastify();
-    app.setErrorHandler((error, _request, reply) => {
-      reply.code(503).send({ handled: (error as Error).message });
-    });
-    await app.register(fileRoutes, { routes });
+    await app.register(fileRoutes, { routes, onError: (error) => seen.push(error) });
     const response = await app.inject({ url: "/crash" });
-    expect(response.statusCode).toBe(503);
-    expect(response.json()).toEqual({ handled: "db down" });
+    expect(response.statusCode).toBe(500);
+    expect(response.json()).toEqual({ error: { status: 500, message: "Internal Server Error" } });
+    expect((seen[0] as Error).message).toBe("db down");
   });
 });

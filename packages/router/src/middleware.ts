@@ -1,30 +1,22 @@
 import type { RouteContext } from "./context.ts";
 import { copyHandlerMeta } from "./route.ts";
 
-/** Runs the rest of the chain and resolves to the downstream handler's result. */
+// Runs the rest of the chain and resolves to the downstream handler's result.
 export type Next = () => Promise<unknown>;
 
-/**
- * Framework-neutral middleware (onion model). It may:
- *
- * - run code before and after `await next()`,
- * - short-circuit by returning a value (or throwing an `HttpError`) without
- *   calling `next()`,
- * - replace the downstream result by returning something else,
- * - share data with later middleware and the handler through `ctx.state`.
- *
- * Returning `undefined` after calling `next()` keeps the downstream result.
- * Returning `undefined` *without* calling `next()` is an error, because it's
- * almost always a forgotten `await next()`.
+/*
+ * Middleware, onion model: code before and after `await next()`, or answer early by returning a value or
+ * throwing an HttpError. Return undefined after next() to keep its result; without next() it's an error
+ * (almost always a forgotten `await next()`).
  */
 export type Middleware = (ctx: RouteContext, next: Next) => unknown;
 
-/** Identity helper that gives inline middleware a typed context. */
+// Identity helper that gives inline middleware a typed context.
 export function defineMiddleware(middleware: Middleware): Middleware {
   return middleware;
 }
 
-/**
+/*
  * Composes middleware around a handler. The result is called once per request.
  *
  * Order: `middleware[0]` is outermost and runs first; the handler runs last.
@@ -72,22 +64,15 @@ interface WrappedHandler {
   readonly handler: (ctx: RouteContext) => unknown;
 }
 
-/** What {@link withMiddleware} wrapped, so the router can validate inside it. */
+// What {@link withMiddleware} wrapped, so the router can validate inside it.
 export function getWrappedHandler(handler: unknown): WrappedHandler | undefined {
   if (typeof handler !== "function") return undefined;
   return (handler as unknown as Record<PropertyKey, WrappedHandler | undefined>)[WRAPPED];
 }
 
-/**
- * Runs middleware in front of one handler, for when only some methods of a
- * route need it (a folder's `middleware.ts` covers every route in the folder).
- *
- * ```ts
- * const auth = withMiddleware(requireToken);
- *
- * export const GET = () => products.list();                     // public
- * export const POST = auth(({ body }: RouteContext) => ...);    // protected
- * ```
+/*
+ * Middleware for a single handler, when only some methods need it: `export const POST = auth(handler)`
+ * with `const auth = withMiddleware(requireToken)`. A folder's middleware.ts covers all its routes.
  */
 export function withMiddleware(
   ...middleware: Middleware[]

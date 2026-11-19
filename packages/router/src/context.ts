@@ -1,27 +1,21 @@
+import type { RouteAuth } from "./guard.ts";
 import type { HttpMethod } from "./methods.ts";
 import type { Params, ParamsOf, Query } from "./params.ts";
 import type { Segment } from "./segments.ts";
 
-/**
- * Augment this interface to customize types across your app:
- *
- * ```ts
- * declare module "@sabit/router" {
- *   interface Register {
- *     state: { user?: { id: string } };
- *   }
- * }
- * ```
+/*
+ * Augment to type your app, e.g. `declare module "@sabit/router" { interface Register {
+ * state: { user?: { id: string } } } }`.
  */
 // biome-ignore lint/suspicious/noEmptyInterface: augmented by applications via declaration merging
 export interface Register {}
 
-/** Per-request data shared between middleware and handlers. */
+// Per-request data shared between middleware and handlers.
 export type State = Register extends { state: infer S extends object }
   ? S
   : Record<string, unknown>;
 
-/**
+/*
  * Framework escape hatch. Each adapter puts its native objects here and exports
  * a typed accessor (for example `getExpress(ctx)` from `@sabit/express`).
  */
@@ -29,25 +23,12 @@ export interface RawPlatform {
   readonly framework: string;
 }
 
-/** Path pattern (e.g. `"/users/[id]"`) or an explicit params object type. */
+// Path pattern (e.g. `"/users/[id]"`) or an explicit params object type.
 type ParamsArg<T> = T extends string ? ParamsOf<T> : T;
 
-/**
- * The context every handler and middleware receives, identical across
- * frameworks.
- *
- * Pass a route pattern to type `params`:
- *
- * ```ts
- * export function GET({ params }: RouteContext<"/users/[id]">) {
- *   return { userId: params.id };
- * }
- * ```
- *
- * A context for a specific route is assignable to a plain `RouteContext`, so
- * shared helpers can accept any context. (This is why `RouteContext` is an
- * alias: resolving `ParamsArg` before reaching the interface lets TypeScript
- * see that params are covariant.)
+/*
+ * What every handler and middleware receives, identical across frameworks. `RouteContext<"/users/[id]">`
+ * types `params`; a route's context is assignable to a plain RouteContext (why this is an alias).
  */
 export type RouteContext<TParams = string, TQuery = Query, TBody = unknown> = RequestContext<
   ParamsArg<TParams>,
@@ -55,52 +36,49 @@ export type RouteContext<TParams = string, TQuery = Query, TBody = unknown> = Re
   TBody
 >;
 
-/**
- * The shape behind {@link RouteContext}, with an already-resolved params type.
- * Prefer `RouteContext` in application code.
+/*
+ * The shape behind RouteContext (prefer that): `method` ("HEAD" even when GET serves it), `path`, matched
+ * `route` pattern, params, query, parsed `body` (JSON, form object or text), headers, state, raw, and `auth`.
  */
 export interface RequestContext<TParams = Params, TQuery = Query, TBody = unknown> {
-  /** Request method. For HEAD requests served by a GET handler this is `"HEAD"`. */
   readonly method: HttpMethod;
-  /** Requested pathname, e.g. `/users/42`. */
   readonly path: string;
-  /** Matched canonical pattern, e.g. `/users/[id]`. */
   readonly route: string;
   readonly params: TParams;
   readonly query: TQuery;
-  /** Parsed request body: JSON, URL-encoded form (as an object) or text. */
   readonly body: TBody;
   readonly headers: Headers;
   readonly state: State;
   readonly raw: RawPlatform;
+  readonly auth?: RouteAuth;
 }
 
-/** Raw param values as a framework reports them. */
+// Raw param values as a framework reports them.
 export type RawParams = Readonly<Record<string, string | readonly string[] | undefined>>;
 
+/*
+ * What an adapter passes to createContext: the request `url` (path with query, or absolute), `params` as
+ * the framework reports them (already decoded), headers, body and the raw platform objects.
+ */
 export interface ContextInit {
   readonly method: HttpMethod;
-  /** Request target: a path with query string (`/users?page=2`) or an absolute URL. */
   readonly url: string;
-  /** Params as reported by the framework, already percent-decoded. */
   readonly params: RawParams;
   readonly headers: Headers;
   readonly body: unknown;
   readonly raw: RawPlatform;
 }
 
-/** The parts of a route that context creation needs. */
+// The parts of a route that context creation needs.
 export interface ContextRoute {
   readonly pattern: string;
   readonly segments: readonly Segment[];
 }
 
-/** Maps a catch-all param name to the key the framework stores its value under. */
+// Maps a catch-all param name to the key the framework stores its value under.
 export type CatchAllKey = (name: string) => string;
 
-/**
- * Builds a {@link RouteContext}. Used by adapters; applications don't need it.
- */
+// Builds a {@link RouteContext}. Used by adapters; applications don't need it.
 export function createContext(
   route: ContextRoute,
   init: ContextInit,
@@ -120,7 +98,7 @@ export function createContext(
   };
 }
 
-/**
+/*
  * Converts framework params to sabit params: dynamic segments become
  * strings, catch-alls become arrays of segments (empty for an optional
  * catch-all that matched nothing).
@@ -164,7 +142,7 @@ export function queryFromSearchParams(searchParams: URLSearchParams): Query {
   return query;
 }
 
-/** Converts Node-style headers (`IncomingHttpHeaders`) to web `Headers`. */
+// Converts Node-style headers (`IncomingHttpHeaders`) to web `Headers`.
 export function headersFromRecord(
   record: Readonly<Record<string, string | readonly string[] | number | undefined>>,
 ): Headers {

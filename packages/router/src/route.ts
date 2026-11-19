@@ -6,7 +6,7 @@ import type { InferOutput, StandardSchemaV1, StandardSchemaV1Issue } from "./sta
 
 const HANDLER_META = Symbol.for("sabit.handler");
 
-/** Validation schemas for a handler. Any Standard Schema works (Zod, Valibot, ArkType, …). */
+// Validation schemas for a handler. Any Standard Schema works (Zod, Valibot, ArkType, …).
 export interface RouteSchemas {
   readonly params?: StandardSchemaV1;
   readonly query?: StandardSchemaV1;
@@ -19,7 +19,7 @@ type OutputOf<S, K extends keyof RouteSchemas, Fallback> = S extends {
   ? InferOutput<Schema>
   : Fallback;
 
-/** Context type for a handler declared with {@link createRoute}. */
+// Context type for a handler declared with {@link createRoute}.
 export type ContextFor<
   P extends string,
   S extends RouteSchemas = Record<never, never>,
@@ -34,7 +34,7 @@ export interface HandlerMeta {
   readonly schemas: RouteSchemas | undefined;
 }
 
-/**
+/*
  * A handler created by {@link RouteBuilder.handle}. It is a plain function an
  * adapter can call with an unvalidated context; validation happens inside.
  * `TResult` is kept for type-level tooling such as typed clients.
@@ -44,32 +44,22 @@ export interface RouteHandler<TResult = unknown> {
   readonly [HANDLER_META]: HandlerMeta;
 }
 
+/*
+ * `handle(handler)` types params from the pattern; `handle(schemas, handler)` validates inputs first
+ * (400 with the issues) and passes the schema output, so coercions and transforms apply.
+ */
 export interface RouteBuilder<P extends string> {
   readonly pattern: P;
-  /** A handler with params typed from the route pattern. */
   handle<R>(handler: (ctx: ContextFor<P>) => R): RouteHandler<R>;
-  /**
-   * A handler whose inputs are validated first. Invalid requests get a `400`
-   * with the validation issues; the handler receives the schema *output*
-   * (so coercions and transforms apply).
-   */
   handle<const S extends RouteSchemas, R>(
     schemas: S,
     handler: (ctx: ContextFor<P, S>) => R,
   ): RouteHandler<R>;
 }
 
-/**
- * Declares typed handlers for the route at `pattern`. The pattern must match the
- * file's location; this is checked when routes are loaded.
- *
- * ```ts
- * // routes/users/[id].ts
- * const route = createRoute("/users/[id]");
- *
- * export const GET = route.handle(({ params }) => ({ id: params.id }));
- * export const PUT = route.handle({ body: UpdateUser }, ({ params, body }) => update(params.id, body));
- * ```
+/*
+ * Typed handlers for `pattern`: `createRoute("/users/[id]").handle({ body: Schema }, ({ params, body }) => …)`.
+ * The pattern must match the file's location; that's checked when routes load.
  */
 export function createRoute<const P extends string>(pattern: P): RouteBuilder<P> {
   if (!pattern.startsWith("/")) {
@@ -92,7 +82,7 @@ export function createRoute<const P extends string>(pattern: P): RouteBuilder<P>
   return { pattern, handle } as RouteBuilder<P>;
 }
 
-/** Copies createRoute() metadata to a wrapper, so the pattern check still applies. */
+// Copies createRoute() metadata to a wrapper, so the pattern check still applies.
 export function copyHandlerMeta(from: unknown, to: object): void {
   const meta = getHandlerMeta(from);
   if (meta) Object.defineProperty(to, HANDLER_META, { value: meta });

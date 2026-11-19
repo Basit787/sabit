@@ -111,7 +111,6 @@ describe("compileRoutes", () => {
     });
 
     it("does not apply a directory's middleware to its sibling file", () => {
-      // users/[id]/middleware.ts lives in the [id] directory; users/[id].ts is beside it.
       expect(chain("users/[id].ts")).toEqual(["middleware.ts", "users/middleware.ts"]);
     });
 

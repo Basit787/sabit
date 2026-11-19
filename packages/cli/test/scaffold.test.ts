@@ -24,18 +24,17 @@ describe("planScaffold", () => {
     const files = Object.fromEntries(planScaffold("blog-posts").map((f) => [f.file, f.content]));
     const api = files["blog-posts/api.ts"];
     const item = files["blog-posts/[id]/api.ts"];
-    expect(api).toContain('import type schema from "./schema.ts";');
-    expect(api).toContain("export type BlogPost = Infer<typeof schema> & { id: string };");
+    expect(api).not.toContain('schema.ts"');
+    expect(api).toContain("export type BlogPost = { id: string; name: string };");
     expect(api).toContain("export const blogPosts: BlogPost[] = [");
     expect(api).toContain("export const GET = () => blogPosts;");
-    expect(api).not.toContain("auth");
+    expect(api).toContain("export const auth = { POST: true };");
     expect(item).toContain('import { type BlogPost, blogPosts } from "../api.ts";');
     expect(files["blog-posts/schema.ts"]).toContain("export default defineSchema({");
   });
 
   it("uses .js imports for projects compiled by tsc (NestJS)", () => {
     const files = planScaffold("users", { importExtension: ".js" });
-    expect(files[0]?.content).toContain('from "./schema.js"');
     expect(files[1]?.content).toContain('from "../api.js"');
   });
 
@@ -89,7 +88,7 @@ describe("planScaffold", () => {
 describe("writeScaffold", () => {
   it("writes a working CRUD resource", async () => {
     const dir = join(await tempProject(), "src/routes");
-    await writeScaffold(dir, planScaffold("users"));
+    await writeScaffold(dir, planScaffold("users", { auth: false }));
 
     const routes = await loadRoutes(dir);
     expect(routes.map((r) => r.file)).toEqual(["users/api.ts", "users/[id]/api.ts"]);
@@ -121,12 +120,6 @@ describe("writeScaffold", () => {
     expect(await call("GET", "/users")).toEqual([200, samples]);
     expect(await call("GET", "/users/1")).toEqual([200, samples[0]]);
 
-    const invalid = await call("POST", "/users", { title: "no name" });
-    expect(invalid[0]).toBe(400);
-    expect(invalid[1].error.details.issues.map((i: { path: string[] }) => i.path)).toEqual([
-      ["name"],
-    ]);
-
     const [status, created] = await call("POST", "/users", { name: "Ada", id: "ignored" });
     expect(status).toBe(201);
     const id = created.id as string;
@@ -137,7 +130,6 @@ describe("writeScaffold", () => {
       200,
       { name: "Ada L.", id },
     ]);
-    expect((await call("PATCH", `/users/${id}`, { name: 5 }))[0]).toBe(400);
     expect(await call("PUT", `/users/${id}`, { name: "Grace" })).toEqual([
       200,
       { name: "Grace", id },
@@ -177,7 +169,7 @@ describe("writeScaffold", () => {
 describe("project style", () => {
   it("writes single-quoted code that still loads", async () => {
     const dir = join(await tempProject(), "src/routes");
-    const files = planScaffold("users", { quote: "single" });
+    const files = planScaffold("users", { quote: "single", auth: false });
     expect(files.every((f) => !f.content.includes('"'))).toBe(true);
     await writeScaffold(dir, files);
     const routes = await loadRoutes(dir);

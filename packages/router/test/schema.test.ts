@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import {
+  type AuthExport,
+  checkAccess,
   compileRoutes,
   executeRoute,
   guard,
@@ -168,5 +170,177 @@ describe("app middleware (src/middleware.ts) and guard()", () => {
     ["/admin/**", "/users", false],
   ])("%s matches %s → %s", (pattern, route, expected) => {
     expect(matchesPattern(pattern, route)).toBe(expected);
+  });
+});
+
+describe('route "auth" export', () => {
+  const appMiddleware = source("../middleware.ts", {
+    default: guard({
+      user: (ctx) => {
+        const token = ctx.headers.get("authorization");
+        if (token === "Bearer a") return { id: "1", role: "admin" };
+        if (token === "Bearer u") return { id: "2", role: "user" };
+        return undefined;
+      },
+    }),
+  });
+  const sources = {
+    routes: [
+      source("open/api.ts", { GET: () => ({ ok: "open" }) }),
+      source("mine/api.ts", { auth: true, GET: ({ state }: RouteContext) => state.user }),
+      source("admin/api.ts", { auth: "admin", GET: () => ({ ok: "admin" }) }),
+      source("orders/api.ts", {
+        auth: { POST: true, DELETE: ["admin"] },
+        GET: () => ({ ok: "list" }),
+        POST: () => ({ ok: "created" }),
+        DELETE: () => undefined,
+      }),
+    ],
+    appMiddleware,
+  };
+  const as = (token?: string) => ({ headers: new Headers(token ? { authorization: token } : {}) });
+
+  it("leaves routes without auth public", async () => {
+    expect(await call(sources, "open/api.ts", "GET")).toEqual([200, { ok: "open" }]);
+  });
+
+  it("auth = true needs any signed-in user", async () => {
+    expect((await call(sources, "mine/api.ts", "GET"))[0]).toBe(401);
+    expect(await call(sources, "mine/api.ts", "GET", as("Bearer u"))).toEqual([
+      200,
+      { id: "2", role: "user" },
+    ]);
+  });
+
+  it("a role needs that role", async () => {
+    expect((await call(sources, "admin/api.ts", "GET", as("Bearer u")))[0]).toBe(403);
+    expect(await call(sources, "admin/api.ts", "GET", as("Bearer a"))).toEqual([
+      200,
+      { ok: "admin" },
+    ]);
+  });
+
+  it("per-method auth only covers the listed methods", async () => {
+    expect(await call(sources, "orders/api.ts", "GET")).toEqual([200, { ok: "list" }]);
+    expect((await call(sources, "orders/api.ts", "POST"))[0]).toBe(401);
+    expect(await call(sources, "orders/api.ts", "POST", as("Bearer u"))).toEqual([
+      200,
+      { ok: "created" },
+    ]);
+    expect((await call(sources, "orders/api.ts", "DELETE", as("Bearer u")))[0]).toBe(403);
+    expect((await call(sources, "orders/api.ts", "DELETE", as("Bearer a")))[0]).toBe(204);
+  });
+
+  it("fails closed: with nothing setting a user, protected routes answer 401", async () => {
+    const plain = { routes: [source("x/api.ts", { auth: true, GET: () => ({ ok: true }) })] };
+    expect((await call(plain, "x/api.ts", "GET", as("Bearer a")))[0]).toBe(401);
+  });
+
+  it("works with any middleware that sets ctx.state.user", async () => {
+    const setsUser = {
+      routes: [source("x/api.ts", { auth: "admin", GET: () => ({ ok: true }) })],
+      appMiddleware: source("../middleware.ts", {
+        default: async (ctx: RouteContext, next: () => Promise<unknown>) => {
+          if (ctx.headers.get("authorization") === "Bearer a") {
+            (ctx.state as Record<string, unknown>).user = { id: "1", role: "admin" };
+          }
+          return next();
+        },
+      }),
+    };
+    expect((await call(setsUser, "x/api.ts", "GET"))[0]).toBe(401);
+    expect(await call(setsUser, "x/api.ts", "GET", as("Bearer a"))).toEqual([200, { ok: true }]);
+  });
+
+  it("refuses invalid auth values at startup", async () => {
+    await expect(
+      resolveRoutes({
+        routes: [source("x/api.ts", { auth: { FETCH: true }, GET: () => 1 })],
+        appMiddleware,
+      }),
+    ).rejects.toThrow(/export "auth" must be/);
+  });
+});
+
+describe("checkAccess (one list of every route in src/middleware.ts)", () => {
+  const access: Record<string, AuthExport> = {
+    "/orders": { POST: true, DELETE: "admin" },
+    "/reports": "admin",
+  };
+  const appMiddleware = source("../middleware.ts", {
+    default: async (ctx: RouteContext, next: () => Promise<unknown>) => {
+      const token = ctx.headers.get("authorization");
+      if (token === "Bearer a") (ctx.state as Record<string, unknown>).user = { role: "admin" };
+      if (token === "Bearer u") (ctx.state as Record<string, unknown>).user = { role: "user" };
+      checkAccess(ctx, access[ctx.route]);
+      return next();
+    },
+  });
+  const sources = {
+    routes: [
+      source("orders/api.ts", {
+        GET: () => ({ ok: 1 }),
+        POST: () => ({ ok: 2 }),
+        DELETE: () => undefined,
+      }),
+      source("reports/api.ts", { GET: () => ({ ok: 3 }) }),
+      source("open/api.ts", { GET: () => ({ ok: 4 }) }),
+    ],
+    appMiddleware,
+  };
+  const as = (token?: string) => ({ headers: new Headers(token ? { authorization: token } : {}) });
+
+  it("applies each route's rule from the list", async () => {
+    expect(await call(sources, "orders/api.ts", "GET")).toEqual([200, { ok: 1 }]);
+    expect((await call(sources, "orders/api.ts", "POST"))[0]).toBe(401);
+    expect(await call(sources, "orders/api.ts", "POST", as("Bearer u"))).toEqual([200, { ok: 2 }]);
+    expect((await call(sources, "orders/api.ts", "DELETE", as("Bearer u")))[0]).toBe(403);
+    expect((await call(sources, "orders/api.ts", "DELETE", as("Bearer a")))[0]).toBe(204);
+    expect((await call(sources, "reports/api.ts", "GET", as("Bearer u")))[0]).toBe(403);
+    expect(await call(sources, "open/api.ts", "GET")).toEqual([200, { ok: 4 }]);
+  });
+});
+
+describe("401 and 403 answers", () => {
+  const sources = {
+    routes: [source("x/api.ts", { auth: "admin", GET: () => ({ ok: true }) })],
+    appMiddleware: source("../middleware.ts", {
+      default: async (ctx: RouteContext, next: () => Promise<unknown>) => {
+        if (ctx.headers.get("authorization") === "Bearer u") {
+          (ctx.state as Record<string, unknown>).user = { role: "user" };
+        }
+        return next();
+      },
+    }),
+  };
+
+  it("401 says to sign in and asks for a bearer token", async () => {
+    const route = (await resolveRoutes(sources)).find((r) => r.file === "x/api.ts");
+    if (!route) throw new Error("no route");
+    const outcome = await executeRoute(route, "GET", makeContext(route.pattern, { method: "GET" }));
+    expect(outcome.status).toBe(401);
+    expect(outcome.headers.get("www-authenticate")).toBe("Bearer");
+    expect(JSON.parse((await readBody(outcome.body)) ?? "null")).toEqual({
+      error: {
+        status: 401,
+        message: "Sign in to use this route",
+        details: { reason: "unauthenticated" },
+      },
+    });
+  });
+
+  it("403 says permission is missing without naming the role", async () => {
+    const [status, body] = await call(sources, "x/api.ts", "GET", {
+      headers: new Headers({ authorization: "Bearer u" }),
+    });
+    expect(status).toBe(403);
+    expect(body).toEqual({
+      error: {
+        status: 403,
+        message: "You don't have permission to use this route",
+        details: { reason: "forbidden" },
+      },
+    });
+    expect(JSON.stringify(body)).not.toContain("admin");
   });
 });

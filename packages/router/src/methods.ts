@@ -1,4 +1,4 @@
-/**
+/*
  * HTTP methods a route module may export, in the order adapters register them.
  * HEAD comes before GET because Fastify auto-creates a HEAD route for every GET
  * route unless an explicit HEAD route was registered first.

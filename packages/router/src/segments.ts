@@ -1,23 +1,24 @@
 import { RouteDefinitionError, type RouteProblem } from "./errors.ts";
 
-/** One URL path segment of a route. Route groups don't produce segments. */
+// One URL path segment of a route. Route groups don't produce segments.
 export type Segment =
   | { readonly kind: "static"; readonly value: string }
   | { readonly kind: "dynamic"; readonly name: string }
   | { readonly kind: "catchAll"; readonly name: string }
   | { readonly kind: "optionalCatchAll"; readonly name: string };
 
+/*
+ * A parsed route path: URL `segments` (root first, empty for /), the route `groups` it's nested in
+ * (outermost first) and the canonical `pattern`, e.g. /users/[id].
+ */
 export interface ParsedRoutePath {
-  /** URL segments, root first. Empty for the root route. */
   readonly segments: readonly Segment[];
-  /** Route group names (`(name)` directories) the file is nested in, outermost first. */
   readonly groups: readonly string[];
-  /** Canonical, framework-neutral pattern, e.g. `/users/[id]`. */
   readonly pattern: string;
 }
 
 const PARAM_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
-/**
+/*
  * Characters allowed in static segments: RFC 3986 unreserved characters plus the
  * sub-delimiters that none of the supported routers treat as syntax.
  * Excluded on purpose: `: * ? ( ) { } + ! [ ]`.
@@ -25,7 +26,7 @@ const PARAM_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const STATIC_SEGMENT = /^[A-Za-z0-9\-._~$&'@,;=]+$/;
 const GROUP = /^\(([^()[\]/]+)\)$/;
 
-/**
+/*
  * File names (without extension) that serve their folder's own path:
  * `users/index.ts` and `users/api.ts` both serve `/users`.
  */
@@ -48,12 +49,9 @@ export function renderPattern(segments: readonly Segment[]): string {
   return `/${segments.map(renderSegment).join("/")}`;
 }
 
-/**
- * Parses a route file path, relative to the routes directory, with `/`
- * separators and *without* its extension: `users/[id]`, `(auth)/login`, `index`,
- * `users/api`.
- *
- * Returns the parsed path or the list of problems found.
+/*
+ * Parses a route path relative to the routes folder, `/`-separated, without extension (`users/[id]`,
+ * `(auth)/login`, `users/api`). Returns the parsed path or every problem found.
  */
 export function tryParseRoutePath(
   pathWithoutExtension: string,
@@ -117,7 +115,7 @@ export function tryParseRoutePath(
   return { ok: true, value: { segments, groups, pattern: renderPattern(segments) } };
 }
 
-/** Like {@link tryParseRoutePath}, but throws a {@link RouteDefinitionError}. */
+// Like {@link tryParseRoutePath}, but throws a {@link RouteDefinitionError}.
 export function parseRoutePath(pathWithoutExtension: string, file?: string): ParsedRoutePath {
   const result = tryParseRoutePath(pathWithoutExtension, file);
   if (!result.ok) throw new RouteDefinitionError(result.problems);

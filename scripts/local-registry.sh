@@ -14,7 +14,7 @@ DATA="$ROOT/.local-registry"
 PORT="${SABIT_REGISTRY_PORT:-4873}"
 REGISTRY="http://localhost:$PORT"
 VERDACCIO="verdaccio@7.1.1"
-PACKAGES=(packages/router packages/schema packages/adapters/express packages/adapters/hono packages/adapters/fastify packages/adapters/nest packages/cli packages/create-sabit)
+PACKAGES=(packages/router packages/schema packages/adapters/common packages/adapters/express packages/adapters/hono packages/adapters/fastify packages/adapters/nest packages/cli packages/create-sabit)
 
 running() { curl -sf "$REGISTRY/-/ping" >/dev/null 2>&1; }
 
@@ -24,7 +24,7 @@ up() {
   else
     mkdir -p "$DATA"
     echo "Starting local registry at $REGISTRY ..."
-    nohup npx --yes "$VERDACCIO" --config "$ROOT/scripts/local-registry/config.yaml" --listen "$PORT" \
+    nohup npx --yes "$VERDACCIO" --config "$ROOT/scripts/local-registry/config.yaml" --listen "127.0.0.1:$PORT" \
       >"$DATA/verdaccio.log" 2>&1 &
     echo $! >"$DATA/verdaccio.pid"
     for _ in $(seq 1 60); do running && break; sleep 1; done

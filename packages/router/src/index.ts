@@ -23,14 +23,23 @@ export { executeRoute, fallbackMethods } from "./execute.ts";
 export { isMiddlewareFile, isModuleFileName, isSchemaFile, MODULE_EXTENSIONS } from "./files.ts";
 export type { PathDialect } from "./format.ts";
 export { formatPaths } from "./format.ts";
-export type { GuardOptions, GuardRule } from "./guard.ts";
-export { guard, matchesPattern } from "./guard.ts";
+export type { AuthExport, GuardOptions, GuardRule, RouteAuth } from "./guard.ts";
+export {
+  checkAccess,
+  forbidden,
+  guard,
+  matchesPattern,
+  requireUser,
+  unauthorized,
+} from "./guard.ts";
 export type { MatchableRoute, RouteMatch } from "./matcher.ts";
 export { createMatcher } from "./matcher.ts";
 export type { HttpMethod } from "./methods.ts";
 export { HTTP_METHODS, isHttpMethod } from "./methods.ts";
 export type { Middleware, Next } from "./middleware.ts";
 export { composeMiddleware, defineMiddleware, withMiddleware } from "./middleware.ts";
+export type { OpenApiOptions, RouteDocs } from "./openapi.ts";
+export { apiDocsEnabled, apiDocsPage, openApiDocument } from "./openapi.ts";
 export type { Params, ParamsOf, Query } from "./params.ts";
 export type {
   ComposedHandler,

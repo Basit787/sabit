@@ -13,8 +13,6 @@ apps/docs/.vitepress/dist
 
 # Env
 .env
-.env.*
-!.env.example
 
 # Logs
 *.log

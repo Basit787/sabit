@@ -1,49 +1,53 @@
-import { type CompiledRoute, compileRoutes } from "./compile.ts";
+import { type CompiledRoute, compareRoutes, compileRoutes } from "./compile.ts";
 import type { RouteContext } from "./context.ts";
 import { RouteDefinitionError, type RouteProblem } from "./errors.ts";
+import { type AuthExport, type RouteAuth, requireUser } from "./guard.ts";
 import { HTTP_METHODS, type HttpMethod } from "./methods.ts";
 import { composeMiddleware, getWrappedHandler, type Middleware } from "./middleware.ts";
+import { apiDocsEnabled, apiDocsRoutes } from "./openapi.ts";
 import { getHandlerMeta } from "./route.ts";
 import type { StandardSchemaV1 } from "./standard-schema.ts";
 import { isStandardSchema, validateBody } from "./validation.ts";
 
-/** A loaded route module: named HTTP method exports plus optional extras. */
+// A loaded route module: named HTTP method exports plus optional extras.
 export type RouteModule = Readonly<Record<string, unknown>>;
 
-/** A module file and how to load it (dynamic `import()`, or a static object). */
+// A module file (relative to the routes folder, `/`-separated, with extension) and how to load it.
 export interface ModuleSource {
-  /** Path relative to the routes directory, `/`-separated, with extension. */
   readonly file: string;
   load(): unknown;
 }
 
+/*
+ * What resolveRoutes loads: route and middleware modules, schema.ts files (they check bodies in their folder
+ * and below) and the app's src/middleware.ts, which runs first. `apiDocs` adds the built-in API docs at /docs
+ * (off in production unless API_DOCS=true); the URL /docs is then reserved.
+ */
 export interface RouteSources {
   readonly routes: readonly ModuleSource[];
   readonly middleware?: readonly ModuleSource[];
-  /** `schema.ts` files: their default export checks bodies of routes in that folder and below. */
   readonly schemas?: readonly ModuleSource[];
-  /** The app's `src/middleware.ts`: runs before every route, first. */
   readonly appMiddleware?: ModuleSource;
+  readonly apiDocs?: false | { readonly title?: string };
 }
 
 export type ComposedHandler = (ctx: RouteContext) => Promise<unknown>;
 
-/** A compiled route with its module loaded and its handlers composed with middleware. */
+/*
+ * A compiled route, loaded: exported `methods` (HEAD before GET), the `allow` header value, `handlers` wrapped
+ * in their middleware, the raw `module` (extra exports: Nest guards, docs) and its schema.ts `bodySchema`.
+ */
 export interface ResolvedRoute extends CompiledRoute {
-  /** Methods the module exports, in registration order (HEAD before GET). */
   readonly methods: readonly HttpMethod[];
-  /** Value for the `Allow` header: exported methods, plus HEAD when GET exists, plus OPTIONS. */
+  readonly bodySchema?: StandardSchemaV1 | undefined;
   readonly allow: readonly HttpMethod[];
-  /** Handlers wrapped with inherited and route-level middleware. */
   readonly handlers: Readonly<Partial<Record<HttpMethod, ComposedHandler>>>;
-  /** The raw module, for adapters that read extra exports (e.g. Nest guards). */
   readonly module: RouteModule;
 }
 
-/**
- * Compiles and loads routes. Every problem (bad file names, conflicts, load
- * failures, malformed exports) is collected and thrown together as a
- * {@link RouteDefinitionError}.
+/*
+ * Compiles and loads routes; every problem (bad names, conflicts, load failures, bad exports) is thrown
+ * together. A route's `auth` is checked after all middleware (which sets ctx.state.user), before validation.
  */
 export async function resolveRoutes(sources: RouteSources): Promise<ResolvedRoute[]> {
   const compiled = compileRoutes({
@@ -121,15 +125,45 @@ export async function resolveRoutes(sources: RouteSources): Promise<ResolvedRout
       ...route.middleware.flatMap((file) => middlewareByFile.get(file) ?? []),
       ...result.middleware,
     ];
+    const auth = readAuthExport(route.file, mod.auth, problems);
     const handlers: Partial<Record<HttpMethod, ComposedHandler>> = {};
     const bodySchema = route.schema ? schemaByFile.get(route.schema) : undefined;
     for (const [method, handler] of result.handlers) {
-      const checked = bodySchema ? withBodySchema(method, bodySchema, handler) : handler;
-      handlers[method] = composeMiddleware(chain, checked);
+      const validated = bodySchema ? withBodySchema(method, bodySchema, handler) : handler;
+      const required = auth?.(method);
+      const checked = required === undefined ? validated : withAuth(required, validated);
+      const composed = composeMiddleware(chain, checked);
+      handlers[method] =
+        required === undefined
+          ? composed
+          : (ctx) => {
+              (ctx as { auth?: RouteAuth }).auth = required;
+              return composed(ctx);
+            };
     }
     const methods = result.handlers.map(([method]) => method);
-    resolved.push({ ...route, methods, allow: allowedMethods(methods), handlers, module: mod });
+    resolved.push({
+      ...route,
+      methods,
+      allow: allowedMethods(methods),
+      handlers,
+      module: mod,
+      bodySchema,
+    });
   });
+
+  const apiDocs = sources.apiDocs || undefined;
+  if (apiDocs) {
+    for (const route of resolved) {
+      const first = route.segments[0];
+      if (first?.kind !== "static" || first.value.toLowerCase() !== "docs") continue;
+      problems.push({
+        file: route.file,
+        message: "/docs is the built-in API docs",
+        hint: "rename the top-level docs folder; nested ones such as products/docs are fine",
+      });
+    }
+  }
 
   if (problems.length > 0) {
     const cause =
@@ -140,10 +174,63 @@ export async function resolveRoutes(sources: RouteSources): Promise<ResolvedRout
           : undefined;
     throw new RouteDefinitionError(problems, { cause });
   }
-  return resolved;
+  if (!apiDocs || !apiDocsEnabled()) return resolved;
+  const access = appModule?.access as Readonly<Record<string, AuthExport | undefined>> | undefined;
+  const docs = apiDocsRoutes(resolved, { title: apiDocs.title, access });
+  return [...resolved, ...docs].sort(compareRoutes);
 }
 
 type Handler = (ctx: RouteContext) => unknown;
+
+/*
+ * Enforces a route's `auth` export with the user middleware put on
+ * `ctx.state.user`: none is 401, a missing role 403. Fails closed: if no
+ * middleware sets a user, protected routes answer 401.
+ */
+function withAuth(required: RouteAuth, handler: Handler): Handler {
+  return (ctx) => {
+    requireUser(ctx, required);
+    return handler(ctx);
+  };
+}
+
+// Reads a route file's `auth` export into "what does this method require".
+function readAuthExport(
+  file: string,
+  value: unknown,
+  problems: RouteProblem[],
+): ((method: HttpMethod) => RouteAuth | undefined) | undefined {
+  if (value === undefined || value === false) return undefined;
+  const one = (v: unknown): RouteAuth | undefined | null => {
+    if (v === undefined || v === false) return undefined;
+    if (v === true || (typeof v === "string" && v !== "")) return v;
+    if (Array.isArray(v) && v.length > 0 && v.every((r) => typeof r === "string" && r !== "")) {
+      return v as readonly string[];
+    }
+    return null;
+  };
+  const invalid = () => {
+    problems.push({
+      file,
+      message:
+        'export "auth" must be true, a role, a list of roles, or an object of those per method',
+      hint: 'e.g. export const auth = true; or export const auth = { POST: true, DELETE: "admin" };',
+    });
+    return undefined;
+  };
+  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
+    const perMethod = new Map<HttpMethod, RouteAuth>();
+    for (const [key, v] of Object.entries(value)) {
+      const required = one(v);
+      if (!HTTP_METHODS.includes(key as HttpMethod) || required === null) return invalid();
+      if (required !== undefined) perMethod.set(key as HttpMethod, required);
+    }
+    return (method) => perMethod.get(method);
+  }
+  const required = one(value);
+  if (required === null || required === undefined) return invalid();
+  return () => required;
+}
 
 function readRouteModule(
   route: CompiledRoute,
@@ -196,10 +283,9 @@ function readRouteModule(
   return { handlers, middleware: middleware ?? [] };
 }
 
-/**
- * A folder's `schema.ts` checks POST and PUT bodies in full and PATCH
- * bodies field by field (when the schema has `partial()`). It runs after
- * middleware, so auth answers before validation does.
+/*
+ * A folder's schema.ts checks POST and PUT bodies in full and PATCH bodies field by field. It runs inside
+ * per-endpoint middleware too, so auth still answers before validation.
  */
 function withBodySchema(
   method: HttpMethod,
@@ -207,7 +293,6 @@ function withBodySchema(
   handler: Handler,
 ): Handler {
   if (method !== "POST" && method !== "PUT" && method !== "PATCH") return handler;
-  // Validate inside per-endpoint middleware (auth(...)) too, so auth still answers first.
   const wrapped = getWrappedHandler(handler);
   if (wrapped) {
     return composeMiddleware(

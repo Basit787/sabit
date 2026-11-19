@@ -65,5 +65,24 @@ const match = createMatcher(routes);
 match("/users/42"); // { route: { pattern: "/users/[id]", ... }, params: { id: "42" } }
 ```
 
+## API docs
+
+`resolveRoutes({ ...routeTree, apiDocs: { title: "Shop API" } })` adds
+`GET /docs` (Swagger UI) and `GET /docs/openapi.json` to the resolved routes,
+outside every middleware; the generated route tree sets `apiDocs` for you.
+They're off when `NODE_ENV=production` unless `API_DOCS=true`, and a route of
+your own at `/docs` is an error. To serve the docs yourself:
+
+```ts
+import { apiDocsPage, openApiDocument } from "@sabit/router";
+
+openApiDocument(routes, { title: "Shop API", access }); // OpenAPI 3.1 from resolved routes
+await apiDocsPage("/docs/openapi.json"); // a Swagger UI page (Response) for it
+```
+
+Bodies come from each folder's `schema.ts` (Standard JSON Schema: Zod 4,
+`@sabit/schema`); `access` (the app's access list) and `auth` exports mark
+protected routes; a route exporting `docs = false` is left out.
+
 See the [main README](../../README.md) for conventions and handler behavior,
 and [ARCHITECTURE.md](../../ARCHITECTURE.md) for how adapters use the SDK.

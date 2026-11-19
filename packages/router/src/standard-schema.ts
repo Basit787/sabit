@@ -1,8 +1,6 @@
-/**
- * The Standard Schema v1 interface (https://standardschema.dev), vendored as
- * types so validation libraries such as Zod, Valibot and ArkType work without
- * this package depending on any of them. The spec explicitly allows copying
- * these types. Names are flattened instead of using a namespace.
+/*
+ * Standard Schema v1 (standardschema.dev), copied as types so Zod, Valibot and ArkType work without
+ * this package depending on them. The spec allows copying; names are flattened, no namespace.
  */
 export interface StandardSchemaV1<Input = unknown, Output = Input> {
   readonly "~standard": StandardSchemaV1Props<Input, Output>;

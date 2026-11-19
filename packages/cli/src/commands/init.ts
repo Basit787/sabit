@@ -3,8 +3,9 @@ import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import * as prompts from "@clack/prompts";
-import { refreshRouteTree } from "../codegen.ts";
+import { refreshEnvFile, refreshRouteTree } from "../codegen.ts";
 import type { Command, Output } from "../command.ts";
+import { applyFeatures, askFeatures, detectProject, type Features } from "../features.ts";
 import { FRAMEWORKS, type Framework, findFramework, templateDir } from "../frameworks.ts";
 import {
   cliVersion,
@@ -14,15 +15,15 @@ import {
   type PackageManager,
   runScript,
 } from "../project.ts";
-import { detectProjectStyle, detectQuoteStyle, planScaffold, writeScaffold } from "../scaffold.ts";
+import { listRoutesInMiddleware } from "../route-watcher.ts";
+import { detectImportExtension, detectQuoteStyle, routePatterns } from "../scaffold.ts";
 import { appMiddlewareFile } from "../templates.ts";
-import { report } from "./add.ts";
 
 const PACKAGE_MANAGERS: readonly PackageManager[] = ["npm", "pnpm", "yarn", "bun"];
 const LINTERS = ["default", "biome", "none"] as const;
 type Linter = (typeof LINTERS)[number];
 
-/** Files and dev dependencies that belong to each starter's default lint/format setup. */
+// Files and dev dependencies that belong to each starter's default lint/format setup.
 const DEFAULT_LINT_FILES = ["eslint.config.ts", ".oxlintrc.json", ".prettierrc", ".prettierignore"];
 const DEFAULT_LINT_DEPS = [
   "@eslint/js",
@@ -36,6 +37,11 @@ const DEFAULT_LINT_DEPS = [
 ];
 const BIOME_VERSION = "2.6.8";
 
+/*
+ * `sabit init`: copies the starter, adds the chosen stack, Docker and auth files, the users routes, tests
+ * and src/middleware.ts with every route in its access list. Inside the sabit repo it uses pnpm workspace:*;
+ * a custom registry is kept in .npmrc (and reached as host.docker.internal from Docker).
+ */
 export const init: Command = {
   name: "init",
   aliases: ["create"],
@@ -51,6 +57,13 @@ export const init: Command = {
     --pm <npm|pnpm|yarn|bun>          package manager
     --lint <default|biome|none>       default: ESLint + Prettier (Express, Hono, Fastify),
                                       oxlint + Prettier (NestJS)
+    --db <postgres|mongodb|none>      database, with its connection code
+    --orm <prisma|drizzle|kysely|mongoose|typegoose>
+                                      default: prisma (postgres), mongoose (mongodb);
+                                      mongodb also takes typegoose (NestJS) or prisma
+    --auth <jwt|better-auth|none>     sign-up, login and sessions (Better Auth needs --db)
+    --with <redis,bullmq,kafka,rabbitmq,mailpit>
+                                      extra services, comma-separated
     --install / --no-install          install dependencies
     --git / --no-git                  initialize a git repository
     --yes, -y                         accept defaults for anything not given`,
@@ -58,6 +71,10 @@ export const init: Command = {
     framework: { type: "string", short: "f" },
     pm: { type: "string" },
     lint: { type: "string" },
+    db: { type: "string" },
+    orm: { type: "string" },
+    with: { type: "string" },
+    auth: { type: "string" },
     install: { type: "boolean" },
     "no-install": { type: "boolean" },
     git: { type: "boolean" },
@@ -69,12 +86,10 @@ export const init: Command = {
     if (ask) prompts.intro("Create a sabit project");
     const answers = await collectAnswers(args[0], flags, ask, out);
     if (!answers) return 1;
-    const { framework, lint, install, git } = answers;
+    const { framework, lint, features, install, git } = answers;
 
     const dir = resolve(cwd, answers.dir);
     const repo = findSabitRepo(dir);
-    // Inside the sabit repository, projects depend on the local packages through
-    // pnpm's `workspace:` protocol, which other package managers can't install.
     const pm = repo ? "pnpm" : answers.pm;
     if (pm !== answers.pm) {
       out.log(`Using pnpm instead of ${answers.pm}: this project is inside the sabit repository.`);
@@ -93,9 +108,6 @@ export const init: Command = {
       await writeFile(join(dir, "biome.json"), biomeConfig(framework));
       written.push("biome.json");
     }
-    // Created through a custom registry (a company mirror, or a local test
-    // registry)? Keep using it in this project. npm passes the registry on to
-    // child processes, but pnpm, yarn and bun don't read npm's variables.
     const registry = customRegistry(process.env);
     if (registry && !repo && !existsSync(join(dir, ".npmrc"))) {
       await writeFile(join(dir, ".npmrc"), `registry=${registry}\n`);
@@ -106,38 +118,36 @@ export const init: Command = {
     out.log("");
     out.log(`Created a new ${framework.label} project in ${where}`);
     for (const file of written) out.log(`  created  ${file}`);
-    report(
-      await writeScaffold(join(dir, "src/routes"), planScaffold("users", detectProjectStyle(dir))),
-      "src/routes",
-      out,
-    );
-    // src/middleware.ts: who may call what (like Next.js middleware.ts).
-    const appMiddleware = join(dir, "src/middleware.ts");
-    if (!existsSync(appMiddleware)) {
-      const source = appMiddlewareFile();
+    const routesDir = join(dir, "src/routes");
+    const middleware = join(dir, "src/middleware.ts");
+    if (!existsSync(middleware)) {
+      const source = appMiddlewareFile(
+        (await routePatterns(routesDir)).map((pattern) => [pattern, "false"] as const),
+        detectImportExtension(dir),
+      );
       await writeFile(
-        appMiddleware,
+        middleware,
         detectQuoteStyle(dir) === "single" ? source.replaceAll('"', "'") : source,
       );
       out.log("  created  src/middleware.ts");
     }
-    // The starter's server imports the generated route tree.
-    if (
-      !(await refreshRouteTree(dir, join(dir, "src/routes"), out, { create: true, quiet: true }))
-    ) {
+    const project = detectProject(dir);
+    if (!project) {
+      out.error("The starter has no @sabit adapter in package.json.");
       return 1;
     }
+    const steps = await applyFeatures({ ...project, pm }, features, out);
+    if (!(await refreshRouteTree(dir, routesDir, out, { create: true, quiet: true }))) return 1;
+    await listRoutesInMiddleware(dir, routesDir, out);
+    await refreshEnvFile(dir, routesDir, out);
 
     let failed = false;
     if (git) initGit(dir, out);
     if (install) {
       out.log("");
       out.log(`Installing dependencies with ${pm}...`);
-      // One command string: the shell finds pm.cmd on Windows, and no
-      // arguments are passed separately (Node deprecates that with `shell`).
       const result = spawnSync(`${pm} install`, { cwd: dir, stdio: "inherit", shell: true });
       if (result.status === 0 && lint === "biome") {
-        // The starters come formatted by their own tools; let Biome apply its safe fixes once.
         spawnSync("node_modules/.bin/biome check --write .", {
           cwd: dir,
           stdio: "ignore",
@@ -152,18 +162,18 @@ export const init: Command = {
       }
     }
 
-    const steps: Array<[string, string]> = [];
-    if (where !== ".") steps.push([`cd ${where}`, ""]);
-    if (!install || failed) steps.push([`${pm} install`, ""]);
-    steps.push(
-      [runScript(pm, "dev"), "start with reload on http://localhost:3000"],
-      [`${execBin(pm)} add products`, "add /products endpoints"],
-      ["mkdir src/routes/orders", "(while dev runs) adds /orders endpoints"],
+    printSteps(
+      [
+        ...(where !== "." ? [[`cd ${where}`, ""] as [string, string]] : []),
+        ...(!install || failed ? [[`${pm} install`, ""] as [string, string]] : []),
+        ...steps,
+        [runScript(pm, "dev"), "start with reload on http://localhost:3000"],
+        [`${execBin(pm)} add products`, "add /products endpoints"],
+        ["mkdir src/routes/orders", "(while dev runs) adds /orders endpoints"],
+      ],
+      pm,
+      out,
     );
-    const width = Math.max(...steps.map(([command]) => command.length));
-    out.log("");
-    out.log("Next steps:");
-    for (const [command, note] of steps) out.log(`  ${command.padEnd(width)}   ${note}`.trimEnd());
     if (!repo && !registry && version === "0.0.0") {
       out.log("");
       out.log("Note: sabit isn't published to npm yet, so installing will fail for now.");
@@ -174,7 +184,7 @@ export const init: Command = {
 
 const PUBLIC_REGISTRIES = ["https://registry.npmjs.org", "https://registry.yarnpkg.com"];
 
-/** The registry this command was run with, if it isn't the public npm registry. */
+// The registry this command was run with, if it isn't the public npm registry.
 export function customRegistry(env: NodeJS.ProcessEnv): string | undefined {
   const registry = (env.npm_config_registry ?? env.NPM_CONFIG_REGISTRY)?.trim();
   if (!registry) return undefined;
@@ -187,15 +197,14 @@ interface Answers {
   readonly framework: Framework;
   readonly pm: PackageManager;
   readonly lint: Linter;
+  readonly features: Features;
   readonly install: boolean;
   readonly git: boolean;
 }
 
-/**
- * Takes each answer from its flag, else asks (arrow-key menus when a terminal
- * is attached), else uses the default. Installing and git default to "yes"
- * when asked and "no" in scripts, so automation never does surprising work.
- * Returns undefined on invalid flags or when the user cancels (Ctrl+C).
+/*
+ * Each answer comes from its flag, else a prompt (in a terminal), else the default. Install and git
+ * default to yes when asked, no in scripts. Undefined on invalid flags or Ctrl+C.
  */
 async function collectAnswers(
   dirArg: string | undefined,
@@ -282,6 +291,17 @@ async function collectAnswers(
     lint = answer;
   }
 
+  const features = await askFeatures({
+    installed: { extras: [] },
+    framework,
+    flags,
+    ask,
+    gate: true,
+    out,
+    cancelled,
+  });
+  if (!features) return undefined;
+
   const yesNo = async (flag: string, message: string): Promise<boolean | undefined> => {
     if (flags[flag] === true) return true;
     if (flags[`no-${flag}`] === true) return false;
@@ -294,10 +314,10 @@ async function collectAnswers(
   const git = await yesNo("git", "Initialize a git repository?");
   if (git === undefined) return undefined;
 
-  return { dir, framework, pm, lint, install, git };
+  return { dir, framework, pm, lint, features, install, git };
 }
 
-/** Drops the default lint setup's files, scripts and dependencies when another linter is chosen. */
+// Drops the default lint setup's files, scripts and dependencies when another linter is chosen.
 function adjustForLinter(file: string, content: string, lint: Linter): string | null {
   if (lint === "default") return content;
   if (DEFAULT_LINT_FILES.includes(file)) return null;
@@ -321,27 +341,27 @@ function adjustForLinter(file: string, content: string, lint: Linter): string | 
   return `${JSON.stringify(pkg, null, 2)}\n`;
 }
 
+/*
+ * biome.json for a starter: source code only (the route tree is generated); NestJS keeps value imports
+ * and parameter decorators for DI. Short arrays stay on one line, as Biome formats its own config.
+ */
 function biomeConfig(framework: Framework): string {
   const config = {
     $schema: `https://biomejs.dev/schemas/${BIOME_VERSION}/schema.json`,
-    // Source code only, like the ESLint/oxlint setups; the route tree is generated.
     files: { includes: ["src/**", "test/**", "!src/sabit.route.ts"] },
     formatter: { indentStyle: "space", lineWidth: 100 },
     linter: {
       rules: {
         preset: "recommended",
-        // Nest's dependency injection needs value imports of injected classes.
         ...(framework.id === "nest" ? { style: { useImportType: "off" } } : {}),
       },
     },
     javascript: {
       formatter: { quoteStyle: framework.id === "nest" ? "single" : "double" },
-      // Nest injects dependencies through constructor parameter decorators.
       ...(framework.id === "nest" ? { parser: { unsafeParameterDecoratorsEnabled: true } } : {}),
     },
     assist: { actions: { source: { organizeImports: "on" } } },
   };
-  // Biome checks its own config file, and keeps short arrays on one line.
   const json = JSON.stringify(config, null, 2).replace(
     /\[\n\s+((?:"[^"\n]*",?\s*)+)\n\s*\]/g,
     (_match, items: string) => `[${items.trim().split(/,\s*/).join(", ")}]`,
@@ -376,15 +396,12 @@ function packageName(dir: string): string {
   );
 }
 
-/** Template names stored without a leading dot, so npm publishes them intact. */
+// Template names stored without a leading dot, so npm publishes them intact.
 const DOTFILE_NAMES: Record<string, string> = { _gitignore: ".gitignore", _vscode: ".vscode" };
 
-/**
- * Copies a template folder, filling in `{{name}}` and `{{kit}}`. `_gitignore`
- * becomes `.gitignore` and `_vscode` becomes `.vscode` (npm drops `.gitignore`).
- * `transform` may rewrite a file or return `null` to skip it. Existing files
- * are kept; an existing package.json gets the template's scripts and
- * dependencies merged in.
+/*
+ * Copies a template, filling `{{name}}`/`{{kit}}`; `_gitignore` and `_vscode` get their dots back.
+ * `transform` rewrites a file or skips it (null). Existing files are kept; package.json is merged.
  */
 async function copyTemplate(
   from: string,
@@ -441,4 +458,21 @@ async function mergePackageJson(path: string, template: Record<string, unknown>,
     pkg[key] = Object.fromEntries(Object.entries(merged).sort(([a], [b]) => a.localeCompare(b)));
   }
   await writeFile(path, `${JSON.stringify(pkg, null, 2)}\n`);
+}
+
+// Prints the next steps, then how to add more later with `sabit setup`.
+export function printSteps(
+  steps: ReadonlyArray<[string, string]>,
+  pm: PackageManager,
+  out: Output,
+) {
+  const commands = steps.filter(([command]) => command);
+  const width = Math.max(...commands.map(([command]) => command.length));
+  out.log("");
+  out.log("Next steps:");
+  for (const [command, note] of commands) out.log(`  ${command.padEnd(width)}   ${note}`.trimEnd());
+  for (const [command, note] of steps) if (!command) out.log(`  ${note}`);
+  out.log("");
+  out.log("Add more any time: a database, auth, Redis, queues, email or Docker");
+  out.log(`  ${execBin(pm)} setup`);
 }

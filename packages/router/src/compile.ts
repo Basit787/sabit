@@ -2,31 +2,28 @@ import { RouteDefinitionError, type RouteProblem } from "./errors.ts";
 import { dirnameOf, stripExtension } from "./files.ts";
 import { type Segment, tryParseRoutePath } from "./segments.ts";
 
+// Route, middleware and schema.ts module paths, relative to the routes folder, `/`-separated, with extensions.
 export interface RouteFiles {
-  /** Route module paths relative to the routes directory, `/`-separated, with extensions. */
   readonly routes: readonly string[];
-  /** Middleware module paths (`middleware.ts` files), same format. */
   readonly middleware?: readonly string[];
-  /** Body schema paths (`schema.ts` files), same format. */
   readonly schemas?: readonly string[];
 }
 
-/** A route whose path has been parsed and validated, before its module is loaded. */
+/*
+ * A route parsed and validated, before its module loads: its `file`, unique canonical `pattern`, the
+ * `middleware` files that apply (routes root first) and the nearest `schema.ts`, if any.
+ */
 export interface CompiledRoute {
-  /** Path of the route file relative to the routes directory, e.g. `users/[id].ts`. */
   readonly file: string;
-  /** Canonical pattern, e.g. `/users/[id]`. Unique across the route table. */
   readonly pattern: string;
   readonly segments: readonly Segment[];
   readonly groups: readonly string[];
   readonly paramNames: readonly string[];
-  /** Middleware files that apply to this route, outermost (routes root) first. */
   readonly middleware: readonly string[];
-  /** The nearest `schema.ts` in the route's folder or above, if any. */
   readonly schema?: string;
 }
 
-/**
+/*
  * Validates route file paths, attaches inherited middleware, detects conflicts
  * and sorts routes from most to least specific.
  *
@@ -104,11 +101,9 @@ function middlewareChain(file: string, middlewareByDir: ReadonlyMap<string, stri
   return chain;
 }
 
-/**
- * Two routes conflict when some request path would be claimed by both at the
- * same specificity: same shape after erasing param names. Static segments are
- * compared case-insensitively because Express matches case-insensitively by
- * default. An optional catch-all claims both its parent path and the catch-all.
+/*
+ * Two routes conflict when the same path would match both at the same specificity (same shape without
+ * param names; static parts compared case-insensitively, like Express). `[[...x]]` also claims its parent.
  */
 function findConflicts(routes: readonly CompiledRoute[]): RouteProblem[] {
   const owners = new Map<string, CompiledRoute>();
@@ -171,13 +166,9 @@ const RANK: Record<Segment["kind"], number> = {
   optionalCatchAll: 3,
 };
 
-/**
- * Orders routes so that, at the first segment where they differ, static beats
- * dynamic beats catch-all beats optional catch-all, and a path that ends beats
- * one that continues. Routers that match in
- * registration order (Express, Hono) then agree with routers that rank by
- * specificity (Fastify). Ties fall back to the pattern string so the order is
- * deterministic.
+/*
+ * Orders routes by the first differing segment: static, dynamic, catch-all, optional catch-all; the path
+ * that ends first wins. Different statics never match the same path, so they sort by name; ties by pattern.
  */
 export function compareRoutes(
   a: Pick<CompiledRoute, "segments" | "pattern">,
@@ -187,12 +178,9 @@ export function compareRoutes(
   for (let i = 0; i < length; i++) {
     const sa = a.segments[i];
     const sb = b.segments[i];
-    // The path that ended first is more specific (`/docs` before `/docs/[[...slug]]`).
     if (!sa || !sb) return sa ? 1 : -1;
     const rank = RANK[sa.kind] - RANK[sb.kind];
     if (rank !== 0) return rank;
-    // Different static values never match the same path, so their relative order
-    // doesn't affect matching; sort them by name to keep listings readable.
     if (sa.kind === "static" && sb.kind === "static" && sa.value !== sb.value) {
       return sa.value < sb.value ? -1 : 1;
     }

@@ -1,6 +1,6 @@
 import { fileURLToPath } from "node:url";
 
-/**
+/*
  * Frameworks `sabit init` can set up. Each has a starter project in
  * `templates/<id>/`, based on the framework's official starter with
  * file-based routing added. Edit those folders to change what users get.
@@ -21,7 +21,7 @@ export function findFramework(id: string): Framework | undefined {
   return FRAMEWORKS.find((f) => f.id === id || f.label.toLowerCase() === id.toLowerCase());
 }
 
-/** Absolute path of a framework's starter template (works from `src/` and `dist/`). */
+// Absolute path of a framework's starter template (works from `src/` and `dist/`).
 export function templateDir(framework: Framework): string {
   return fileURLToPath(new URL(`../templates/${framework.id}/`, import.meta.url));
 }

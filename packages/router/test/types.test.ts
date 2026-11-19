@@ -1,5 +1,7 @@
-// Type-level tests. These run as part of `pnpm typecheck` (tsc checks test files);
-// at runtime `expectTypeOf` is a no-op.
+/*
+ * Type-level tests. These run as part of `pnpm typecheck` (tsc checks test files);
+ * at runtime `expectTypeOf` is a no-op.
+ */
 import { describe, expectTypeOf, it } from "vitest";
 import { z } from "zod";
 import {

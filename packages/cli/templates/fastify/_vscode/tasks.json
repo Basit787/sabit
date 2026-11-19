@@ -9,7 +9,7 @@
       "isBackground": true,
       "problemMatcher": [],
       "runOptions": { "runOn": "folderOpen" },
-      "presentation": { "reveal": "silent", "panel": "dedicated", "group": "sabit" }
+      "presentation": { "reveal": "never", "echo": false, "showReuseMessage": false, "panel": "dedicated", "group": "sabit" }
     }
   ]
 }

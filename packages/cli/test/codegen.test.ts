@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { type RouteSources, resolveRoutes } from "@sabit/router";
@@ -15,7 +15,7 @@ import { captureOutput, tempProject } from "./helpers.ts";
 async function projectWithUsers() {
   const root = await tempProject();
   const routesDir = join(root, "src/routes");
-  await writeScaffold(routesDir, planScaffold("users"));
+  await writeScaffold(routesDir, planScaffold("users", { auth: false }));
   await writeFile(join(routesDir, "api.ts"), "export const GET = () => 'hi';\n");
   await writeFile(
     join(routesDir, "middleware.ts"),
@@ -27,6 +27,7 @@ async function projectWithUsers() {
 describe("route tree", () => {
   it("statically imports every route and middleware file", async () => {
     const { routesDir } = await projectWithUsers();
+    await writeFile(join(routesDir, "users/schema.ts"), "export default {};\n");
     const source = await generateRouteTree({ routesDir });
     expect(source).toContain('import * as middleware0 from "./routes/middleware.ts";');
     expect(source).toContain('import * as route0 from "./routes/api.ts";');
@@ -68,6 +69,8 @@ describe("route tree", () => {
     const routes = await resolveRoutes(routeTree);
     expect(routes.map((r) => [r.pattern, r.methods.join(",")])).toEqual([
       ["/", "GET"],
+      ["/docs", "GET"],
+      ["/docs/openapi.json", "GET"],
       ["/users", "GET,POST"],
       ["/users/[id]", "GET,PUT,PATCH,DELETE"],
     ]);
@@ -102,8 +105,33 @@ describe("route tree", () => {
   it("is created by `sabit init`", async () => {
     const root = await tempProject();
     await run(["init", "--framework", "hono"], { cwd: root, out: captureOutput() });
-    expect(await readFile(join(root, "src/sabit.route.ts"), "utf8")).toContain(
-      'import * as route1 from "./routes/users/api.ts";',
-    );
+    const tree = await readFile(join(root, "src/sabit.route.ts"), "utf8");
+    expect(tree).toMatch(/import \* as route\d+ from "\.\/routes\/users\/api\.ts";/);
+    expect(tree).not.toContain("routes/docs");
+    expect(tree).toMatch(/apiDocs: \{ title: ".+ API" \},/);
+  });
+
+  it("refuses a top-level docs folder, the built-in API docs, but not a nested one", async () => {
+    const { routesDir } = await projectWithUsers();
+    await mkdir(join(routesDir, "users/docs"));
+    await writeFile(join(routesDir, "users/docs/api.ts"), "export const GET = () => [];\n");
+    await expect(generateRouteTree({ routesDir })).resolves.toContain('"/users/docs"');
+    await mkdir(join(routesDir, "docs"));
+    await writeFile(join(routesDir, "docs/api.ts"), "export const GET = () => [];\n");
+    await expect(generateRouteTree({ routesDir })).rejects.toThrow(/built-in API docs/);
+  });
+
+  it("is kept in step by the access list: deleted routes are removed from it", async () => {
+    const root = await tempProject();
+    await run(["init", "--framework", "hono"], { cwd: root, out: captureOutput() });
+    const out = captureOutput();
+    expect(await run(["add", "orders"], { cwd: root, out })).toBe(0);
+    const middleware = join(root, "src/middleware.ts");
+    expect(await readFile(middleware, "utf8")).toContain('"/orders/[id]"');
+    await rm(join(root, "src/routes/orders"), { recursive: true });
+    expect(await run(["generate"], { cwd: root, out })).toBe(0);
+    expect(await run(["add", "docs"], { cwd: root, out })).toBe(0);
+    expect(out.errors.join("\n")).toContain("/docs is the built-in API docs");
+    expect(await readFile(middleware, "utf8")).not.toContain("/orders");
   });
 });

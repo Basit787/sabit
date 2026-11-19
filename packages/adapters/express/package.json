@@ -47,6 +47,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@sabit/adapter-common": "workspace:^",
     "@sabit/router": "workspace:^"
   },
   "peerDependencies": {

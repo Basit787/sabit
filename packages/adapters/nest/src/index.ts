@@ -23,9 +23,9 @@ import {
   UseInterceptors,
 } from "@nestjs/common";
 import { ModuleRef } from "@nestjs/core";
+import { createRunner, type RouteRunner, type SecurityOptions } from "@sabit/adapter-common";
 import {
   createContext,
-  executeRoute,
   fallbackMethods,
   formatPaths,
   type HttpMethod,
@@ -40,7 +40,7 @@ import {
 } from "@sabit/router";
 import { hasNodeBody, readNodeText, writeNodeResponse } from "@sabit/router/node";
 
-/** Path syntax of Nest 11+ on Express 5 (path-to-regexp v8). */
+// Path syntax of Nest 11+ on Express 5 (path-to-regexp v8).
 export const nestDialect: PathDialect = {
   param: (name) => `:${name}`,
   catchAll: (name) => `*${name}`,
@@ -58,49 +58,25 @@ export interface NestPlatform extends RawPlatform {
 export type Guard = Type<CanActivate> | CanActivate;
 export type Interceptor = Type<NestInterceptor> | NestInterceptor;
 
+/*
+ * `routes` (or their promise), `path` prefix, `guards` and `interceptors` for every route (before
+ * per-route exports), `imports` and `providers` they need, plus the shared SecurityOptions.
+ */
 export interface FileRoutesModuleOptions<
   TRoutes extends readonly ResolvedRoute[] | Promise<readonly ResolvedRoute[]>,
-> {
-  /** Routes from `loadRoutes()`, or the promise it returns. */
+> extends SecurityOptions {
   readonly routes: TRoutes;
-  /** Path prefix for every file route (the generated controllers' path). */
   readonly path?: string;
-  /** Guards applied to every file route, before per-route `guards` exports. */
   readonly guards?: readonly Guard[];
-  /** Interceptors applied to every file route, before per-route `interceptors` exports. */
   readonly interceptors?: readonly Interceptor[];
-  /** Modules whose exports guards, interceptors and handlers need. */
   readonly imports?: ModuleMetadata["imports"];
-  /** Providers available to guards, interceptors and `getNest(ctx).resolve()`. */
   readonly providers?: readonly Provider[];
 }
 
-/**
- * Serves file routes inside a NestJS application. Each route file becomes a
- * real Nest controller, so routes show up in Nest's router and logs, and
- * guards, interceptors and exception filters run in Nest's usual order.
- *
- * ```ts
- * @Module({
- *   imports: [
- *     FileRoutesModule.forRoot({
- *       routes: loadRoutes(new URL("./routes", import.meta.url)),
- *       guards: [AuthGuard],
- *     }),
- *   ],
- * })
- * export class AppModule {}
- * ```
- *
- * Route modules may additionally export:
- * - `guards`: guard classes or instances for that route,
- * - `interceptors`: interceptor classes or instances for that route,
- * - `metadata`: an object whose entries are applied with `SetMetadata`, for
- *   guards that read metadata through `Reflector`.
- *
- * Responses are written by sabit (Nest's library-specific response
- * mode), so interceptors can run code before and after a handler but cannot
- * replace its response body.
+/*
+ * Serves file routes in a Nest app: each route file becomes a real controller, so guards,
+ * interceptors and filters run as usual. Routes may export `guards`, `interceptors` and `metadata`;
+ * sabit writes the response, so interceptors can't replace the body.
  */
 // biome-ignore lint/complexity/noStaticOnlyClass: Nest dynamic modules are classes with static forRoot(); the class is the module token.
 export class FileRoutesModule {
@@ -132,21 +108,33 @@ const METHOD_DECORATORS: Record<HttpMethod, (path: string[]) => MethodDecorator>
   OPTIONS: Options,
 };
 
-/** Builds one Nest controller class per route. Exported for advanced setups and tests. */
+/*
+ * One Nest controller class per route, sharing one runner so the rate limit counts across routes.
+ * Exported for advanced setups and tests.
+ */
 export function createControllers(
   routes: readonly ResolvedRoute[],
-  options: Pick<FileRoutesModuleOptions<never>, "path" | "guards" | "interceptors"> = {},
+  options: Pick<
+    FileRoutesModuleOptions<never>,
+    "path" | "guards" | "interceptors" | "rateLimit" | "onError"
+  > = {},
 ): Type[] {
   const problems: RouteProblem[] = [];
-  const controllers = routes.map((route) => createController(route, options, problems));
+  const run = createRunner(options);
+  const controllers = routes.map((route) => createController(route, options, problems, run));
   if (problems.length > 0) throw new RouteDefinitionError(problems);
   return controllers;
 }
 
+/*
+ * A controller for one route. Methods are declared in registration order: the exported ones (HEAD
+ * before GET), then a catch-all so unsupported methods get 405.
+ */
 function createController(
   route: ResolvedRoute,
   options: Pick<FileRoutesModuleOptions<never>, "path" | "guards" | "interceptors">,
   problems: RouteProblem[],
+  run: RouteRunner,
 ): Type {
   class FileRouteController {
     readonly moduleRef: ModuleRef;
@@ -162,7 +150,7 @@ function createController(
 
   const define = (key: string, decorate: MethodDecorator) => {
     prototype[key] = function (this: FileRouteController, req: NestRequest, res: ServerResponse) {
-      return handle(route, this.moduleRef, req, res);
+      return handle(route, this.moduleRef, req, res, run);
     };
     Req()(prototype, key, 0);
     Res()(prototype, key, 1);
@@ -170,8 +158,6 @@ function createController(
     decorate(prototype, key, descriptor);
   };
 
-  // Declaration order is registration order: exported methods (HEAD before GET),
-  // then a catch-all for everything else so unsupported methods get 405.
   for (const method of route.methods) define(`handle${method}`, METHOD_DECORATORS[method](paths));
   if (fallbackMethods(route).length > 0) define("handleUnsupportedMethod", All(paths));
 
@@ -223,6 +209,7 @@ async function handle(
   moduleRef: ModuleRef,
   req: NestRequest,
   res: ServerResponse,
+  run: RouteRunner,
 ): Promise<void> {
   if (typeof (res as Partial<ServerResponse>).setHeader !== "function") {
     throw new Error(
@@ -240,10 +227,11 @@ async function handle(
     body: await readBody(req),
     raw,
   });
-  await writeNodeResponse(res, await executeRoute(route, method, ctx));
+  const client = (req as { ip?: string }).ip ?? req.socket?.remoteAddress;
+  await writeNodeResponse(res, await run(route, method, ctx, client));
 }
 
-/** Nest parses JSON and URL-encoded bodies; text bodies are read here for parity with other adapters. */
+// Nest parses JSON and URL-encoded bodies; text bodies are read here for parity with other adapters.
 async function readBody(req: NestRequest): Promise<unknown> {
   if (req.body !== undefined) return req.body;
   const type = req.headers["content-type"] ?? "";
@@ -253,24 +241,20 @@ async function readBody(req: NestRequest): Promise<unknown> {
   return undefined;
 }
 
+/*
+ * Nest's request and response for a file route, plus `resolve(token)`: a provider from the app's
+ * container (non-strict lookup).
+ */
 export interface NestAccess {
   readonly request: NestRequest;
   readonly response: ServerResponse;
   readonly moduleRef: ModuleRef;
-  /** Resolves a provider from the application's container (non-strict lookup). */
   resolve<T>(token: Type<T> | string | symbol): T;
 }
 
-/**
- * Returns Nest's native request/response and DI access for a request handled
- * by this adapter. Throws if the request came through a different adapter.
- *
- * ```ts
- * export async function GET(ctx: RouteContext) {
- *   const users = getNest(ctx).resolve(UsersService);
- *   return users.findAll();
- * }
- * ```
+/*
+ * Nest's request, response and DI for a route handled here, e.g. `getNest(ctx).resolve(UsersService)`.
+ * Throws if the request came through another adapter.
  */
 export function getNest(ctx: RouteContext): NestAccess {
   if (ctx.raw.framework !== "nest") {
@@ -284,3 +268,5 @@ export function getNest(ctx: RouteContext): NestAccess {
     resolve: (token) => moduleRef.get(token, { strict: false }),
   };
 }
+
+export { corsOrigin } from "@sabit/adapter-common";

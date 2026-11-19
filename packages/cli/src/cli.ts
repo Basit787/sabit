@@ -32,7 +32,7 @@ function findCommand(name: string): Command | undefined {
   return commands.find((c) => c.name === name || c.aliases?.includes(name));
 }
 
-/** Runs the CLI and resolves to the process exit code. */
+// Runs the CLI and resolves to the process exit code.
 export async function run(argv: readonly string[], options: RunOptions = {}): Promise<number> {
   const out = options.out ?? consoleOutput;
   const [name, ...rest] = argv;

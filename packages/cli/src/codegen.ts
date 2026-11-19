@@ -1,32 +1,33 @@
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { dirname, join, relative, sep } from "node:path";
-import { compileRoutes, RouteDefinitionError } from "@sabit/router";
+import { compileRoutes, RouteDefinitionError, type Segment } from "@sabit/router";
 import { scanRoutes } from "@sabit/router/fs";
 import type { Output } from "./command.ts";
-import { detectImportExtension } from "./scaffold.ts";
+import { detectImportExtension, detectQuoteStyle } from "./scaffold.ts";
+import { ENV_FILE_MARKER, envFile } from "./templates.ts";
 
-/** File name of the generated route tree, next to the routes directory. */
+// File name of the generated route tree, next to the routes directory.
 export const ROUTE_TREE_FILE = "sabit.route.ts";
 
-/** Where the route tree for a routes directory lives: `src/routes` → `src/sabit.route.ts`. */
+// Where the route tree for a routes directory lives: `src/routes` → `src/sabit.route.ts`.
 export function routeTreePath(routesDir: string): string {
   return join(dirname(routesDir), ROUTE_TREE_FILE);
 }
 
+/*
+ * `outFile` defaults to routeTreePath(routesDir); `importExtension` is `.ts` to run TypeScript
+ * directly or `.js` for tsc-compiled projects.
+ */
 export interface RouteTreeOptions {
   readonly routesDir: string;
-  /** Output file. Defaults to {@link routeTreePath}. */
   readonly outFile?: string;
-  /** Extension for import specifiers: `.ts` to run TypeScript directly, `.js` for tsc-compiled projects. */
   readonly importExtension?: ".ts" | ".js";
 }
 
-/**
- * Builds the source of the route tree: a module that statically imports every
- * route and middleware file, so the server doesn't scan the filesystem at
- * startup and bundlers can see every route. Throws a `RouteDefinitionError`
- * when the routes directory has conflicts or invalid file names.
+/*
+ * Builds the route tree: static imports of every route and middleware file, so nothing scans the
+ * filesystem at startup and bundlers see every route. Throws RouteDefinitionError on conflicts.
  */
 export async function generateRouteTree(options: RouteTreeOptions): Promise<string> {
   const { routesDir } = options;
@@ -34,6 +35,16 @@ export async function generateRouteTree(options: RouteTreeOptions): Promise<stri
   const ext = options.importExtension ?? ".ts";
   const { routes, middleware, schemas } = await scanRoutes(routesDir);
   const compiled = compileRoutes({ routes, middleware, schemas });
+  const reserved = compiled.filter((route) => isDocsRoute(route.segments));
+  if (reserved.length > 0) {
+    throw new RouteDefinitionError(
+      reserved.map((route) => ({
+        file: route.file,
+        message: "/docs is the built-in API docs",
+        hint: "rename the top-level docs folder; nested ones such as products/docs are fine",
+      })),
+    );
+  }
   const appMiddlewareFile = join(dirname(routesDir), "middleware.ts");
   const hasAppMiddleware = existsSync(appMiddlewareFile);
 
@@ -86,6 +97,7 @@ export async function generateRouteTree(options: RouteTreeOptions): Promise<stri
     ...(hasAppMiddleware
       ? ['  appMiddleware: { file: "../middleware.ts", load: () => appMiddleware },']
       : []),
+    `  apiDocs: { title: ${JSON.stringify(apiTitle(dirname(routesDir)))} },`,
     "} satisfies RouteSources;",
     "",
     "/** Every URL pattern in the app. */",
@@ -104,7 +116,25 @@ export async function generateRouteTree(options: RouteTreeOptions): Promise<stri
   return lines.join("\n");
 }
 
-/** Writes the route tree if its content changed. Returns whether it wrote. */
+// Whether a route's URL is /docs or below it, which the built-in API docs own.
+export function isDocsRoute(segments: readonly Segment[]): boolean {
+  const first = segments[0];
+  return first?.kind === "static" && first.value.toLowerCase() === "docs";
+}
+
+// The API docs title: the package name from package.json next to src/, plus " API".
+function apiTitle(srcDir: string): string {
+  try {
+    const pkg = JSON.parse(readFileSync(join(srcDir, "..", "package.json"), "utf8")) as {
+      name?: string;
+    };
+    return `${pkg.name ?? "App"} API`;
+  } catch {
+    return "App API";
+  }
+}
+
+// Writes the route tree if its content changed. Returns whether it wrote.
 export async function writeRouteTree(options: RouteTreeOptions): Promise<boolean> {
   const outFile = options.outFile ?? routeTreePath(options.routesDir);
   const content = await generateRouteTree(options);
@@ -114,7 +144,7 @@ export async function writeRouteTree(options: RouteTreeOptions): Promise<boolean
   return true;
 }
 
-/**
+/*
  * Regenerates the route tree. Unless `create` is set, only does so when the
  * file already exists (projects opt in by having it). Reports errors instead
  * of throwing, so watchers keep running. Returns false on errors.
@@ -142,4 +172,39 @@ export async function refreshRouteTree(
     out.error(`Couldn't update ${label}:\n${error.message}`);
     return false;
   }
+}
+
+// Files `src/env.ts` takes its keys from, in the project root.
+export const ENV_FILES = [".env", ".env.example"];
+
+// Keys set in .env and .env.example, in order; undefined when neither file exists.
+export function envKeys(projectRoot: string): string[] | undefined {
+  const files = ENV_FILES.map((file) => join(projectRoot, file)).filter((file) => existsSync(file));
+  if (files.length === 0) return undefined;
+  const keys = new Set<string>();
+  for (const file of files) {
+    for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
+      const key = /^\s*(?:export\s+)?([A-Za-z_]\w*)\s*=/.exec(line)?.[1];
+      if (key) keys.add(key);
+    }
+  }
+  return [...keys];
+}
+
+/*
+ * Rewrites `src/env.ts` (next to the routes directory) so `ENV` has every key in
+ * .env and .env.example. Does nothing without those files (e.g. in a Docker
+ * build) or when env.ts was written by hand.
+ */
+export async function refreshEnvFile(cwd: string, routesDir: string, out: Output): Promise<void> {
+  const keys = envKeys(cwd);
+  if (!keys) return;
+  const file = join(dirname(routesDir), "env.ts");
+  const existing = existsSync(file) ? await readFile(file, "utf8") : undefined;
+  if (existing !== undefined && !existing.includes(ENV_FILE_MARKER)) return;
+  const source = envFile(keys);
+  const content = detectQuoteStyle(cwd) === "single" ? source.replaceAll('"', "'") : source;
+  if (content === existing) return;
+  await writeFile(file, content);
+  out.log(`  ${existing === undefined ? "created" : "updated"}  ${relative(cwd, file) || file}`);
 }

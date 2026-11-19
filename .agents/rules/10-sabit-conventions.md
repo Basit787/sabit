@@ -59,10 +59,12 @@ install or lint (TS 7 vs typescript-eslint, missing `jiti`).
 Don't read, grep or edit `dist/`, `.turbo/`, `coverage/` or `.local-registry/`.
 Why: compiled copies double every search and can be stale.
 
-### C11 Comments: two lines max
-Only the non-obvious (a framework quirk, why a guard exists), above the code.
-Exported functions and types keep a short JSDoc. Why: these files are the docs
-contributors read.
+### C11 Comments: above the declaration, 3 lines max
+One comment above each function, interface, type or class that needs one,
+covering what matters (behaviour, defaults, the non-obvious why); nothing inside
+function bodies or interface members. One line uses `//`, more use `/* */`, never
+`/** */`. Lint/ts directives stay where they are. Why: the user's style, so
+readers find everything in one place.
 
 ### C12 Changesets for published packages
 A change to a published package (`@sabit/*`, `sabit`, `create-sabit`) adds a

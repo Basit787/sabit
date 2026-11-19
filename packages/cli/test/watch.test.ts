@@ -45,7 +45,6 @@ describe("watchNewFolders", () => {
       { delay: 100 },
     );
     try {
-      // Native watchers (FSEvents on macOS) need a moment before they report events.
       await new Promise((r) => setTimeout(r, 200));
       await mkdir(join(dir, "products"));
       await mkdir(join(dir, "(admin)/settings"), { recursive: true });
@@ -78,11 +77,10 @@ describe("startRouteWatcher", () => {
     try {
       await new Promise((r) => setTimeout(r, 200));
       await mkdir(join(routesDir, "products"));
-      await waitFor(() => lines.some((l) => l.includes("products/schema.ts")), 5000);
+      await waitFor(() => lines.some((l) => l.includes("products/[id]/api.ts")), 5000);
       const tree = () => readFile(join(root, "src/sabit.route.ts"), "utf8");
       await waitForAsync(async () => (await tree()).includes('"/products/[id]"'), 5000);
 
-      // Deleting the folder removes its routes from the tree.
       await rm(join(routesDir, "products"), { recursive: true });
       await waitForAsync(async () => !(await tree()).includes("/products"), 5000);
       expect(await tree()).toContain("export type RoutePattern = never;");

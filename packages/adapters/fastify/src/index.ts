@@ -1,6 +1,11 @@
 import {
+  createRunner,
+  DEFAULT_BODY_LIMIT,
+  type RouteRunner,
+  type SecurityOptions,
+} from "@sabit/adapter-common";
+import {
   createContext,
-  executeRoute,
   fallbackMethods,
   formatPaths,
   type HttpMethod,
@@ -21,7 +26,7 @@ import type {
   RouteHandlerMethod,
 } from "fastify";
 
-/** Fastify (find-my-way) path syntax. Wildcards are unnamed and stored under `*`. */
+// Fastify (find-my-way) path syntax. Wildcards are unnamed and stored under `*`.
 export const fastifyDialect: PathDialect = {
   param: (name) => `:${name}`,
   catchAll: () => "*",
@@ -34,42 +39,35 @@ export interface FastifyPlatform extends RawPlatform {
   readonly reply: FastifyReply;
 }
 
-export interface FileRoutesPluginOptions {
+/*
+ * The routes, plus `bodyLimit` (bytes, default 100 KB like the other adapters; over it, 413) and the
+ * shared SecurityOptions.
+ */
+export interface FileRoutesPluginOptions extends SecurityOptions {
   readonly routes: readonly ResolvedRoute[];
+  readonly bodyLimit?: number;
 }
 
-/**
- * Fastify plugin that registers file routes. Use Fastify's own `prefix`
- * option to mount it under a path.
- *
- * ```ts
- * const app = Fastify();
- * await app.register(fileRoutes, {
- *   routes: await loadRoutes(new URL("./routes", import.meta.url)),
- *   prefix: "/api",
- * });
- * ```
- *
- * Fastify parses JSON and `text/plain` bodies itself. The plugin adds parsers
- * for URL-encoded forms and other `text/*` types inside its own encapsulated
- * scope, unless they are already registered.
+/*
+ * Fastify plugin registering the file routes (mount with Fastify's `prefix`); adds URL-encoded and
+ * `text/*` parsers in its own scope. HEAD is registered before GET, so a HEAD export replaces Fastify's own.
  */
 export const fileRoutes: FastifyPluginAsync<FileRoutesPluginOptions> = async (fastify, options) => {
   addBodyParsers(fastify);
+  const run = createRunner(options);
+  const bodyLimit = options.bodyLimit ?? DEFAULT_BODY_LIMIT;
 
   for (const route of options.routes) {
-    const handler = createHandler(route);
+    const handler = createHandler(route, run);
     const fallback = fallbackMethods(route);
     for (const url of formatPaths(route, fastifyDialect)) {
-      // route.methods lists HEAD before GET, so an explicit HEAD export
-      // replaces the HEAD route Fastify would otherwise derive from GET.
-      for (const method of route.methods) fastify.route({ method, url, handler });
-      if (fallback.length > 0) fastify.route({ method: fallback, url, handler });
+      for (const method of route.methods) fastify.route({ method, url, handler, bodyLimit });
+      if (fallback.length > 0) fastify.route({ method: fallback, url, handler, bodyLimit });
     }
   }
 };
 
-function createHandler(route: ResolvedRoute): RouteHandlerMethod {
+function createHandler(route: ResolvedRoute, run: RouteRunner): RouteHandlerMethod {
   return async (request, reply) => {
     const method = request.method as HttpMethod;
     const raw: FastifyPlatform = { framework: "fastify", request, reply };
@@ -85,7 +83,7 @@ function createHandler(route: ResolvedRoute): RouteHandlerMethod {
       },
       fastifyDialect.catchAllKey,
     );
-    return send(reply, await executeRoute(route, method, ctx));
+    return send(reply, await run(route, method, ctx, request.ip));
   };
 }
 
@@ -119,7 +117,7 @@ function addBodyParsers(fastify: FastifyInstance): void {
   }
 }
 
-/**
+/*
  * Returns Fastify's native request and reply for a request handled by this
  * adapter. Throws if the request came through a different adapter.
  */
@@ -130,3 +128,5 @@ export function getFastify(ctx: RouteContext): { request: FastifyRequest; reply:
   const { request, reply } = ctx.raw as FastifyPlatform;
   return { request, reply };
 }
+
+export { corsOrigin } from "@sabit/adapter-common";

@@ -5,29 +5,27 @@ export interface Output {
   error(message: string): void;
 }
 
+/*
+ * What a command runs with: positional `args`, parsed `--flags`, the `cwd`, an `out` for messages, and
+ * `interactive` (stdin is a terminal, so prompts are allowed).
+ */
 export interface CommandContext {
-  /** Positional arguments after the command name. */
   readonly args: readonly string[];
-  /** Parsed `--flags`. */
   readonly flags: Readonly<Record<string, string | boolean | undefined>>;
   readonly cwd: string;
   readonly out: Output;
-  /** Whether stdin is an interactive terminal (prompts are allowed). */
   readonly interactive: boolean;
 }
 
-/**
- * A CLI command. To add one, create a module that exports a `Command` and add
- * it to the list in `commands/index.ts`; nothing else needs to change.
+/*
+ * A CLI command: add a module exporting one to the list in commands/index.ts. `summary` is its line in
+ * `sabit --help`, `usage` its `--help`; `run` resolves to the exit code (long-running ones when they stop).
  */
 export interface Command {
   readonly name: string;
   readonly aliases?: readonly string[];
-  /** One line for `sabit --help`. */
   readonly summary: string;
-  /** Usage line(s) and details for `sabit <command> --help`. */
   readonly usage: string;
   readonly options?: NonNullable<ParseArgsConfig["options"]>;
-  /** Resolves to an exit code (default 0). Long-running commands resolve when they stop. */
   run(ctx: CommandContext): Promise<number | undefined>;
 }

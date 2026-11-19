@@ -128,7 +128,6 @@ describe("loadRoutes", () => {
       });
       const error = await loadRoutes(dir).catch((e: unknown) => e);
       expect(error).toBeInstanceOf(RouteDefinitionError);
-      // Conflicts are detected before any module is imported.
       expect((error as RouteDefinitionError).problems).toEqual([
         expect.objectContaining({
           file: "a/index.mjs",
@@ -142,7 +141,6 @@ describe("loadRoutes", () => {
       const error = (await loadRoutes(dir).catch((e: unknown) => e)) as RouteDefinitionError;
       expect(error.problems[0]?.file).toBe("b.mjs");
       expect(error.problems[0]?.message).toMatch(/^failed to load:/);
-      // Native import() throws a SyntaxError; Vitest's loader wraps it. Either way it's kept.
       expect(error.cause).toBeInstanceOf(Error);
     });
   });

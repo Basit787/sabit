@@ -5,16 +5,14 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { isMiddlewareFile, isModuleFileName, isPrivateName, isSchemaFile } from "../files.ts";
 import { type ResolvedRoute, resolveRoutes } from "../resolve.ts";
 
+// Route, middleware and schema.ts files found under the routes folder: relative, `/`-separated, sorted.
 export interface ScanResult {
-  /** Route files relative to the routes directory, `/`-separated, sorted. */
   readonly routes: string[];
-  /** Middleware files, same format. */
   readonly middleware: string[];
-  /** Body schema files (`schema.ts`), same format. */
   readonly schemas: string[];
 }
 
-/**
+/*
  * Lists route and middleware files under `dir`. Skips `_`-prefixed files and
  * directories, declaration files and `*.test.*` / `*.spec.*` files.
  */
@@ -51,25 +49,14 @@ export async function scanRoutes(dir: string | URL): Promise<ScanResult> {
   return { routes: routes.sort(), middleware: middleware.sort(), schemas: schemas.sort() };
 }
 
+// `importModule` loads a module by file URL: native import() by default, override it for a custom loader.
 export interface LoadRoutesOptions {
-  /**
-   * Imports a module by file URL. Defaults to native `import()`. Override it to
-   * load through a custom loader.
-   */
   import?: (url: string) => Promise<unknown>;
 }
 
-/**
- * Scans `dir`, imports every route and middleware module, and returns routes
- * ready to hand to an adapter.
- *
- * In development `dir` can point at TypeScript sources (Node 22.18+ strips
- * types natively; tsx and Bun work too). In production point it at compiled
- * output.
- *
- * ```ts
- * const routes = await loadRoutes(new URL("./routes", import.meta.url));
- * ```
+/*
+ * Scans `dir`, imports every route and middleware module and returns routes for an adapter. Point it
+ * at TypeScript sources in development (Node 22.18+, tsx, Bun) and at compiled output in production.
  */
 export async function loadRoutes(
   dir: string | URL,

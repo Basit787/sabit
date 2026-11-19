@@ -15,8 +15,10 @@ import { type ModuleSource, type RouteContext, resolveRoutes } from "@sabit/rout
 import { afterEach, describe, expect, it } from "vitest";
 import { createControllers, FileRoutesModule, getNest } from "../src/index.ts";
 
-// Test modules are built with Nest's decorators called as functions, which is
-// exactly what decorator syntax compiles to.
+/*
+ * Test modules are built with Nest's decorators called as functions, which is
+ * exactly what decorator syntax compiles to.
+ */
 function moduleOf(metadata: Parameters<typeof Module>[0]): Type {
   class AppModule {}
   Module(metadata)(AppModule);
@@ -118,7 +120,6 @@ describe("nest adapter", () => {
       imports: [FileRoutesModule.forRoot({ routes, guards: [RolesGuard] })],
     });
 
-    // Guard rejections go through Nest's exception layer (Nest's own error format).
     const denied = await fetch(`${url}/admin`);
     expect(denied.status).toBe(403);
     expect(await denied.json()).toMatchObject({ statusCode: 403 });

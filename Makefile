@@ -40,12 +40,12 @@ local-publish: ## Rebuild and republish sabit to the local registry after change
 local-down: ## Stop the local npm registry
 	@SABIT_REGISTRY_PORT=$(REGISTRY_PORT) scripts/local-registry.sh down
 
-clean: down ## Stop, then remove build output, node_modules and caches
-	rm -rf node_modules .turbo coverage $(LOG_FILE) \
+clean: down local-down ## Stop everything, then remove builds, node_modules, caches and the local registry
+	rm -rf node_modules .turbo coverage $(LOG_FILE) $(PID_FILE) .local-registry \
 	  packages/*/node_modules packages/*/dist packages/*/.turbo packages/*/coverage \
 	  packages/adapters/*/node_modules packages/adapters/*/dist packages/adapters/*/.turbo \
 	  tests/*/node_modules tests/*/.turbo \
-	  examples/*/node_modules apps/*/node_modules \
+	  examples/*/node_modules \
 	  packages/cli/test/.tmp
 	@find . -name '*.tsbuildinfo' -not -path '*/node_modules/*' -delete
 	@echo "Clean. Run 'make install' (or 'make up') to start again."

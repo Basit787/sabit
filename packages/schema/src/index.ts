@@ -2,19 +2,21 @@ import { z } from "zod";
 
 type Constructor = StringConstructor | NumberConstructor | BooleanConstructor | DateConstructor;
 
+// Every field: `required` (must be present in POST and PUT bodies) and `default` (used when it's missing).
 interface Common<T> {
-  /** The field must be present (in POST and PUT bodies). */
   readonly required?: boolean;
-  /** Used when the field is missing. */
   readonly default?: T;
 }
 
+/*
+ * A string field: enum, minLength, maxLength, `match` (a pattern, e.g. /^[a-z0-9-]+$/), trim, lowercase,
+ * uppercase.
+ */
 export interface StringField extends Common<string> {
   readonly type: StringConstructor;
   readonly enum?: readonly string[];
   readonly minLength?: number;
   readonly maxLength?: number;
-  /** Must match this pattern, e.g. /^[a-z0-9-]+$/ */
   readonly match?: RegExp;
   readonly trim?: boolean;
   readonly lowercase?: boolean;
@@ -38,7 +40,7 @@ export interface DateField extends Common<Date> {
   readonly max?: Date;
 }
 
-/**
+/*
  * A field, Mongoose-style: `String` · `{ type: Number, min: 0 }` · `[String]`
  * (a list) · `{ street: String }` (a nested object).
  */
@@ -95,34 +97,24 @@ export type InferDefinition<D extends SchemaDefinition> = Simplify<
   }
 >;
 
-/** A schema made with {@link defineSchema}; also a Standard Schema. */
+/*
+ * A schema made with defineSchema; also a Standard Schema. `partial()` gives the PATCH version (every field
+ * optional, no defaults); `zod` is the underlying Zod schema.
+ */
 export interface Schema<D extends SchemaDefinition = SchemaDefinition> {
   readonly "~standard": z.ZodType<InferDefinition<D>>["~standard"];
-  /** The same rules with every field optional and no defaults (for PATCH). */
   partial(): z.ZodType<Partial<InferDefinition<D>>>;
-  /** The underlying Zod schema, for anything Zod can do. */
   readonly zod: z.ZodType<InferDefinition<D>>;
   readonly definition: D;
 }
 
-/** The type a schema accepts: `type Product = Infer<typeof schema>`. */
+// The type a schema accepts: `type Product = Infer<typeof schema>`.
 export type Infer<S> = S extends Schema<infer D> ? InferDefinition<D> : never;
 
-/**
- * Describes a request body the way you'd describe a Mongoose model:
- *
- * ```ts
- * export default defineSchema({
- *   name: { type: String, required: true, trim: true },
- *   price: { type: Number, min: 0 },
- *   status: { type: String, enum: ["draft", "live"], default: "draft" },
- *   tags: [String],
- *   address: { city: String, zip: String },
- * });
- * ```
- *
- * Fields are optional unless `required: true`. Unknown fields are dropped.
- * Validation uses Zod; `schema.zod` is the Zod schema.
+/*
+ * A request body described like a Mongoose model: `defineSchema({ name: { type: String, required: true },
+ * tags: [String], address: { city: String } })`. Fields are optional unless required; unknown ones are
+ * dropped. Validation uses Zod (`schema.zod`).
  */
 export function defineSchema<const D extends SchemaDefinition>(definition: D): Schema<D> {
   const full = toObject(definition, false) as z.ZodType<InferDefinition<D>>;

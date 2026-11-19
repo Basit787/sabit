@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import type { Output } from "./command.ts";
 
-/**
+/*
  * The routes directory: `--routes` if given, else `src/routes`, else `routes`
  * (whichever exists), defaulting to `src/routes`.
  */
@@ -15,7 +16,7 @@ export function resolveRoutesDir(cwd: string, flag?: string): string {
 
 export type PackageManager = "npm" | "pnpm" | "yarn" | "bun";
 
-/** The package manager that launched this process, from `npm_config_user_agent`. */
+// The package manager that launched this process, from `npm_config_user_agent`.
 export function detectPackageManager(env: NodeJS.ProcessEnv = process.env): PackageManager {
   const agent = env.npm_config_user_agent ?? "";
   if (agent.startsWith("pnpm")) return "pnpm";
@@ -24,12 +25,12 @@ export function detectPackageManager(env: NodeJS.ProcessEnv = process.env): Pack
   return "npm";
 }
 
-/** Command that runs a package script, e.g. `pnpm dev` or `npm run dev`. */
+// Command that runs a package script, e.g. `pnpm dev` or `npm run dev`.
 export function runScript(pm: PackageManager, script: string): string {
   return pm === "npm" ? `npm run ${script}` : `${pm} ${script}`;
 }
 
-/**
+/*
  * If `dir` is inside the sabit repository itself, returns the repo root.
  * Projects created there depend on the local packages (`workspace:*`).
  */
@@ -42,9 +43,7 @@ export function findSabitRepo(dir: string): string | undefined {
         if (JSON.parse(readFileSync(manifest, "utf8")).name === "@sabit/router") {
           return current;
         }
-      } catch {
-        // not ours
-      }
+      } catch {}
     }
     const parent = dirname(current);
     if (parent === current) return undefined;
@@ -52,13 +51,13 @@ export function findSabitRepo(dir: string): string | undefined {
   }
 }
 
-/** This CLI's own version. */
+// This CLI's own version.
 export function cliVersion(): string {
   const manifest = new URL("../package.json", import.meta.url);
   return (JSON.parse(readFileSync(manifest, "utf8")) as { version: string }).version;
 }
 
-/** Command that runs this CLI from a project, e.g. `pnpm sabit` or `npx sabit`. */
+// Command that runs this CLI from a project, e.g. `pnpm sabit` or `npx sabit`.
 export function execBin(pm: PackageManager): string {
   return {
     npm: "npx sabit",
@@ -66,4 +65,18 @@ export function execBin(pm: PackageManager): string {
     yarn: "yarn sabit",
     bun: "bunx sabit",
   }[pm];
+}
+
+/*
+ * `sabit dev` and `sabit watch` change files and run \`prisma migrate dev\`;
+ * neither may touch a production server or database. True (after printing why)
+ * when NODE_ENV is production.
+ */
+export function isProduction(command: string, out: Output): boolean {
+  if (process.env.NODE_ENV !== "production") return false;
+  out.error(
+    `sabit ${command} is for development and doesn't run with NODE_ENV=production. ` +
+      "In production run the built app (npm run build, then npm start).",
+  );
+  return true;
 }

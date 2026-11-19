@@ -2,7 +2,7 @@ import { type HttpError, isHttpError } from "./errors.ts";
 
 const REPLY = Symbol.for("sabit.reply");
 
-/** A handler result with an explicit status code and headers. Create it with {@link reply}. */
+// A handler result with an explicit status code and headers. Create it with {@link reply}.
 export interface Reply<TBody = unknown, TStatus extends number = number> {
   readonly [REPLY]: true;
   readonly status: TStatus;
@@ -10,13 +10,9 @@ export interface Reply<TBody = unknown, TStatus extends number = number> {
   readonly headers: Headers;
 }
 
-/**
- * Returns a response with an explicit status and headers. The body is
- * serialized the same way as a plain return value.
- *
- * ```ts
- * export const POST = () => reply(201, { id: "42" }, { location: "/users/42" });
- * ```
+/*
+ * A response with an explicit status and headers, e.g. `reply(201, user, { location: "/users/42" })`.
+ * The body is serialized like a plain return value.
  */
 export function reply<const TStatus extends number, TBody = undefined>(
   status: TStatus,
@@ -39,7 +35,7 @@ export function isReply(value: unknown): value is Reply {
 
 export type OutcomeBody = string | Uint8Array | ReadableStream<Uint8Array> | null;
 
-/**
+/*
  * A framework-neutral response. Adapters write it with their native APIs.
  * `body` is already serialized.
  */
@@ -53,17 +49,10 @@ const JSON_TYPE = "application/json; charset=utf-8";
 const TEXT_TYPE = "text/plain; charset=utf-8";
 const BINARY_TYPE = "application/octet-stream";
 
-/**
- * Normalizes a handler's return value:
- *
- * - `undefined` → 204, no body
- * - `string` → 200 text/plain
- * - `Uint8Array` / `ArrayBuffer` / `ReadableStream` → 200 application/octet-stream
- * - web `Response` → its status, headers and body
- * - {@link reply} → its status and headers; body serialized by these rules
- * - anything else → 200 JSON
- *
- * A `content-type` header set explicitly via `reply()` is never overridden.
+/*
+ * A handler's return value as a response: undefined → 204, string → text, bytes/streams → binary,
+ * a web Response or reply() → its status and headers, anything else → JSON. An explicit
+ * content-type from reply() is kept.
  */
 export async function toOutcome(value: unknown): Promise<RouteOutcome> {
   if (value instanceof Response) {
@@ -104,20 +93,20 @@ function serializeBody(value: unknown, headers: Headers): OutcomeBody {
   return JSON.stringify(value);
 }
 
-/** The response for an {@link HttpError}. */
+// The response for an {@link HttpError}.
 export function errorOutcome(error: HttpError): RouteOutcome {
   const headers = new Headers(error.headers);
   headers.set("content-type", JSON_TYPE);
   return { status: error.status, headers, body: JSON.stringify(error.toJSON()) };
 }
 
-/** Converts thrown values: HttpErrors become outcomes, anything else is rethrown. */
+// Converts thrown values: HttpErrors become outcomes, anything else is rethrown.
 export function outcomeFromError(error: unknown): RouteOutcome {
   if (isHttpError(error)) return errorOutcome(error);
   throw error;
 }
 
-/** Converts an outcome to a web `Response`, for fetch-based frameworks. */
+// Converts an outcome to a web `Response`, for fetch-based frameworks.
 export function outcomeToResponse(outcome: RouteOutcome): Response {
   return new Response(outcome.body as BodyInit | null, {
     status: outcome.status,

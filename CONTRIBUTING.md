@@ -21,12 +21,12 @@ pnpm test
 
 Or use the Makefile shortcuts:
 
-| Command        | What it does                                                         |
-| -------------- | -------------------------------------------------------------------- |
-| `make install` | Installs dependencies                                                |
-| `make up`      | Installs, builds, then rebuilds packages in the background on change |
-| `make down`    | Stops the background rebuild                                         |
-| `make clean`   | Stops it, then removes `dist/`, every `node_modules/` and caches     |
+| Command        | What it does                                                                          |
+| -------------- | ------------------------------------------------------------------------------------- |
+| `make install` | Installs dependencies                                                                 |
+| `make up`      | Installs, builds, then rebuilds packages in the background on change                  |
+| `make down`    | Stops the background rebuild                                                          |
+| `make clean`   | Stops everything, then removes builds, `node_modules/`, caches and the local registry |
 
 No build step is needed for development. Each package exports its TypeScript
 sources under the `@sabit/source` condition, which the TypeScript config
@@ -51,6 +51,7 @@ every package.
 packages/router/           @sabit/router: the engine (no framework dependencies)
 packages/schema/           @sabit/schema: defineSchema for schema.ts files (uses Zod)
 packages/adapters/<name>/  one package per framework
+packages/adapters/common/  @sabit/adapter-common: what every adapter shares (errors, rate limit, body limit)
 packages/cli/              sabit: the CLI, plus project starters in templates/
 packages/create-sabit/     npm create sabit
 tests/conformance/         behavior every adapter must match, plus its fixture app

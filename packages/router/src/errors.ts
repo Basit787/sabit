@@ -1,23 +1,16 @@
 const HTTP_ERROR = Symbol.for("sabit.http-error");
 
+// `details`: JSON data sent in the error body; `headers`: set on the error response (e.g. WWW-Authenticate).
 export interface HttpErrorOptions {
-  /** Extra, JSON-serializable data included in the error response as `details`. */
   details?: unknown;
-  /** Headers to set on the error response, e.g. `WWW-Authenticate`. */
   headers?: Record<string, string>;
   cause?: unknown;
 }
 
-/**
- * Throw from a handler or middleware to send an error response. Every adapter
- * turns it into the same JSON body:
- *
- * ```json
- * { "error": { "status": 404, "message": "User not found" } }
- * ```
- *
- * Errors that are not `HttpError`s are passed to the framework's own error
- * handling instead.
+/*
+ * Throw from a handler or middleware to answer with this status, as
+ * `{ "error": { "status": 404, "message": "User not found" } }` on every adapter. Any other error
+ * becomes a plain 500 (the adapters log it, never send it).
  */
 export class HttpError extends Error {
   readonly status: number;
@@ -46,7 +39,7 @@ export class HttpError extends Error {
   }
 }
 
-/** Works across duplicated copies of this package (e.g. mismatched versions). */
+// Works across duplicated copies of this package (e.g. mismatched versions).
 export function isHttpError(value: unknown): value is HttpError {
   return (
     typeof value === "object" &&
@@ -78,7 +71,7 @@ function defaultMessage(status: number): string {
   }
 }
 
-/**
+/*
  * A problem with the route tree itself: an invalid file name, a conflict, or a
  * route module with the wrong shape. Thrown at startup, never per request.
  * `problems` lists every issue found, so users can fix them in one pass.
@@ -93,11 +86,13 @@ export class RouteDefinitionError extends Error {
   }
 }
 
+/*
+ * A problem in one route file: its path relative to the routes folder (`/`-separated), what's wrong and,
+ * when there's an obvious fix, a `hint`.
+ */
 export interface RouteProblem {
-  /** Route file path relative to the routes directory, using `/` separators. */
   file: string;
   message: string;
-  /** How to fix it, when there's an obvious fix. */
   hint?: string;
 }
 

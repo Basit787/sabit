@@ -2,7 +2,7 @@ import { type FSWatcher, watch } from "node:fs";
 import { readdir, stat } from "node:fs/promises";
 import { join, sep } from "node:path";
 
-/** Whether a folder name is one the scaffolder fills (not private, not a route group). */
+// Whether a folder name is one the scaffolder fills (not private, not a route group).
 export function isScaffoldable(folder: string): boolean {
   const last = folder.split("/").at(-1) ?? "";
   return last !== "" && !last.startsWith("_") && !last.startsWith(".") && !/^\(.*\)$/.test(last);
@@ -17,7 +17,7 @@ async function isEmptyDirectory(path: string): Promise<boolean> {
   }
 }
 
-/** Empty, scaffoldable folders under `routesDir`, relative and `/`-separated. */
+// Empty, scaffoldable folders under `routesDir`, relative and `/`-separated.
 export async function findEmptyFolders(routesDir: string): Promise<string[]> {
   const found: string[] = [];
   const walk = async (relative: string) => {
@@ -37,7 +37,7 @@ export interface FolderWatcher {
   close(): void;
 }
 
-/**
+/*
  * Calls `onFolder` when a new, still-empty folder appears under `routesDir`.
  * Waits `delay` ms first, so folders created by tools that immediately add
  * files (editors, `git checkout`, the scaffolder itself) are left alone.

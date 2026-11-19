@@ -1,7 +1,7 @@
 import { HttpError } from "./errors.ts";
 import type { StandardSchemaV1 } from "./standard-schema.ts";
 
-/**
+/*
  * Validates a request body against a Standard Schema (a `schema()` or Zod,
  * Valibot, ...). Throws a 400 `HttpError` listing every issue.
  */
@@ -19,7 +19,7 @@ export async function validateBody(validator: StandardSchemaV1, body: unknown): 
   throw new HttpError(400, "Validation failed", { details: { issues } });
 }
 
-/** Whether a value is a Standard Schema. */
+// Whether a value is a Standard Schema.
 export function isStandardSchema(value: unknown): value is StandardSchemaV1 {
   return (
     typeof value === "object" &&

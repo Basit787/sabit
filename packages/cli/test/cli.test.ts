@@ -36,9 +36,14 @@ describe("sabit", () => {
         "  created  src/routes/users/api.ts  →  GET, POST /users",
         "  created  src/routes/users/[id]/api.ts  →  GET, PUT, PATCH, DELETE /users/:id",
         "  created  src/routes/users/schema.ts",
+        "  created  test/request.ts",
+        "  created  test/routes/users/api.test.ts",
+        "  created  test/routes/users/[id]/api.test.ts",
         "  created  src/routes/posts/api.ts  →  GET, POST /posts",
         "  created  src/routes/posts/[id]/api.ts  →  GET, PUT, PATCH, DELETE /posts/:id",
         "  created  src/routes/posts/schema.ts",
+        "  created  test/routes/posts/api.test.ts",
+        "  created  test/routes/posts/[id]/api.test.ts",
       ]);
 
       const list = captureOutput();
@@ -61,6 +66,8 @@ describe("sabit", () => {
       expect(out.lines).toEqual([
         "  created  src/routes/orders/api.ts  →  GET, POST /orders",
         "  created  src/routes/orders/schema.ts",
+        "  created  test/request.ts",
+        "  created  test/routes/orders/api.test.ts",
       ]);
     });
 
@@ -131,9 +138,16 @@ describe("sabit", () => {
         expect(pkg.dependencies[`@sabit/${framework}`]).toBe("workspace:*");
         expect(JSON.stringify(pkg)).not.toContain("{{");
 
-        expect(out.lines).toContain("  created  src/routes/users/api.ts  →  GET, POST /users");
-        expect(out.lines).toContain("  created  src/routes/users/schema.ts");
+        expect(out.lines).toContain("  created  src/routes/users/api.ts");
         expect(out.lines).toContain("  created  src/middleware.ts");
+        expect(existsSync(join(dir, "src/routes/docs"))).toBe(false);
+        expect(await readFile(join(dir, "src/sabit.route.ts"), "utf8")).toContain(
+          'apiDocs: { title: "my-app API" }',
+        );
+        expect(out.lines).toContain("  pnpm sabit setup");
+        expect(JSON.parse(await readFile(join(dir, "sabit.json"), "utf8")).features).toEqual({
+          extras: [],
+        });
       },
     );
 
@@ -219,7 +233,90 @@ describe("sabit", () => {
       expect(Object.keys(pkg.dependencies)).toEqual(
         expect.arrayContaining(["@sabit/hono", "@sabit/express", "express", "hono"]),
       );
-      expect(out.lines).toContain("  exists   src/routes/users/api.ts  (left unchanged)");
+      expect(existsSync(join(cwd, "src/routes/users/api.ts.sabit-new"))).toBe(false);
+    });
+  });
+
+  describe("setup", () => {
+    it("refuses outside a sabit project", async () => {
+      const cwd = await tempProject();
+      const out = captureOutput();
+      expect(await run(["setup", "auth", "--no-install"], { cwd, out })).toBe(1);
+      expect(out.errors[0]).toMatch(/No sabit project here/);
+    });
+
+    it("asks for feature names when there is no terminal for the menu", async () => {
+      const cwd = await tempProject();
+      await run(["init", "--framework", "hono"], { cwd, out: captureOutput() });
+      const out = captureOutput();
+      expect(await run(["setup", "--no-install"], { cwd, out })).toBe(1);
+      expect(out.errors[0]).toMatch(/Name what to add/);
+    });
+
+    it("adds auth and Docker to a plain project and records them", async () => {
+      const cwd = await tempProject();
+      await run(["init", "--framework", "hono"], { cwd, out: captureOutput() });
+      const out = captureOutput();
+      expect(await run(["setup", "auth", "docker", "--no-install"], { cwd, out })).toBe(0);
+
+      expect(await readFile(join(cwd, "src/auth/utils/jwt.ts"), "utf8")).toContain("jose");
+      expect(existsSync(join(cwd, "src/routes/auth/login/api.ts"))).toBe(true);
+      expect(existsSync(join(cwd, "Dockerfile"))).toBe(true);
+      expect(existsSync(join(cwd, "docker-compose.yml"))).toBe(true);
+      const state = JSON.parse(await readFile(join(cwd, "sabit.json"), "utf8"));
+      expect(state.features.auth).toBe("jwt");
+      expect(state.features.docker).toEqual({ dockerfile: true, compose: true, app: true });
+      expect(out.lines).toContain("  pnpm sabit setup");
+    });
+
+    it("keeps a file you changed and writes sabit's version next to it", async () => {
+      const cwd = await tempProject();
+      await run(["init", "--framework", "express"], { cwd, out: captureOutput() });
+      await writeFile(join(cwd, "src/auth/index.ts"), "export const mine = true;\n");
+      const out = captureOutput();
+      expect(await run(["setup", "auth", "--no-install"], { cwd, out })).toBe(0);
+
+      expect(await readFile(join(cwd, "src/auth/index.ts"), "utf8")).toBe(
+        "export const mine = true;\n",
+      );
+      expect(await readFile(join(cwd, "src/auth/index.ts.sabit-new"), "utf8")).toContain(
+        "Custom JWT",
+      );
+      expect(out.lines.join("\n")).toMatch(/kept {5}src\/auth\/index.ts \(you changed it\)/);
+    });
+
+    it("adds Better Auth on the project's database", async () => {
+      const cwd = await tempProject();
+      await run(["init", "--framework", "express"], { cwd, out: captureOutput() });
+      const args = ["setup", "auth", "--auth", "better-auth", "--no-install"];
+      const refused = captureOutput();
+      expect(await run(args, { cwd, out: refused })).toBe(1);
+      expect(refused.errors[0]).toMatch(/Better Auth keeps accounts in a database/);
+
+      const out = captureOutput();
+      expect(await run([...args, "--db", "postgres", "--orm", "drizzle"], { cwd, out })).toBe(0);
+      expect(await readFile(join(cwd, "src/auth/database.ts"), "utf8")).toContain("drizzleAdapter");
+      expect(await readFile(join(cwd, "src/db/schema.ts"), "utf8")).toContain(
+        "export const sessions = pgTable(",
+      );
+      expect(existsSync(join(cwd, "src/routes/auth/login/api.ts"))).toBe(true);
+      expect(await readFile(join(cwd, "src/middleware.ts"), "utf8")).toContain('"/auth/me": true');
+      const pkg = JSON.parse(await readFile(join(cwd, "package.json"), "utf8"));
+      expect(pkg.dependencies["better-auth"]).toBeDefined();
+      expect(await readFile(join(cwd, ".env.example"), "utf8")).toContain(
+        "BETTER_AUTH_SECRET=replace-with",
+      );
+      expect(out.lines.join("\n")).toContain("POST /auth/login");
+      expect(await readFile(join(cwd, ".env.example"), "utf8")).not.toContain("ADMIN_");
+    });
+
+    it("says so when there is nothing to add", async () => {
+      const cwd = await tempProject();
+      await run(["init", "--framework", "fastify"], { cwd, out: captureOutput() });
+      await run(["setup", "auth", "--no-install"], { cwd, out: captureOutput() });
+      const out = captureOutput();
+      expect(await run(["setup", "auth", "--no-install"], { cwd, out })).toBe(0);
+      expect(out.lines).toContain("Nothing to set up.");
     });
   });
 

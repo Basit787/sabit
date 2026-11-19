@@ -111,46 +111,31 @@ export default defineSchema({
 });
 ```
 
-| Option                                                              | Works on       |
-| ------------------------------------------------------------------- | -------------- |
-| `required`, `default`                                               | every type     |
-| `enum`                                                              | String, Number |
-| `min`, `max`                                                        | Number, Date   |
-| `minLength`, `maxLength`, `match`, `trim`, `lowercase`, `uppercase` | String         |
-
-Unknown fields are dropped, and a bad request gets a `400` listing every
-problem. Creating an empty `schema.ts` while `dev` runs fills in a starter.
-Validation uses Zod underneath; `schema.zod` is the Zod schema if you need it.
+- A body that doesn't match is answered with `400` listing every problem.
+- The route gets the checked body: defaults filled in, unknown fields dropped.
+- Zod, Valibot or any other Standard Schema works too.
+- Create an empty `schema.ts` while `sabit dev` runs to get a starter.
 
 ## Protect routes: `src/middleware.ts`
 
-One file decides who may call what, like Next.js's `middleware.ts`:
+`src/middleware.ts` lists every route and who may call it. sabit adds new
+routes to the list as public (`false`); change the value to protect one:
 
 ```ts
-// src/middleware.ts
-import { guard } from "@sabit/router";
-
-export default guard({
-  rules: [
-    { path: "/**", methods: ["POST", "PUT", "PATCH", "DELETE"] }, // writes: signed in
-    { path: "/**", methods: ["DELETE"], role: "admin" }, // deletes: admins
-    { path: "/admin/**", role: "admin" }, // a whole area
-  ],
-  user(ctx) {
-    // Who is calling: verify a JWT, look up a session...
-    // Return { id, role } or undefined.
-  },
-});
+const access: Partial<Record<RoutePattern, AuthExport>> = {
+  "/products": { POST: true }, // writes: signed in
+  "/products/[id]": { PUT: true, DELETE: "admin" }, // deletes: admins
+  "/users": "admin", // a whole route
+};
 ```
 
-- A request matching no rule is public.
+- `false` is public, `true` needs a signed-in user, `"admin"` that role.
+- Deleting a route folder removes its entry.
 - No user → `401`; wrong role → `403`.
-- Paths are folder paths: `/products` (exactly), `/products/*` (one level
-  below), `/products/**` (everything below).
+- The middleware asks `src/auth/index.ts` who is calling (`currentUser`).
 
-New projects start with the two write rules above and a demo `user()`:
-`Authorization: Bearer <ADMIN_TOKEN>` is an admin and `Bearer <AUTH_TOKEN>` is
-a user. Replace `user()` with your real auth.
+New projects start with a demo `currentUser`: `Authorization: Bearer
+<ADMIN_TOKEN>` is an admin and `Bearer <AUTH_TOKEN>` is a user.
 
 ```sh
 AUTH_TOKEN=secret npm run dev
@@ -158,16 +143,64 @@ curl -X POST localhost:3000/products -H 'authorization: Bearer secret' \
   -H 'content-type: application/json' -d '{"name":"Pen"}'
 ```
 
+### Real sign-in: `sabit setup auth`
+
+Pick one; both keep their code in `src/auth/` (one small file per job, helpers
+in `src/auth/utils/`) and have the same routes: `POST /auth/register`,
+`/auth/login`, `/auth/logout` and `GET /auth/me`. Register takes `name`,
+`email` and `password`; login takes `email` and `password`. On the first start
+in development they create an `admin@example.com` / `12345678` admin; change
+its email and password after signing in (it isn't created again while an admin
+exists).
+
+| Option      | Flag                 | What you get                                                                    |
+| ----------- | -------------------- | ------------------------------------------------------------------------------- |
+| Custom JWT  | `--auth jwt`         | your own code; cookies, plus `/auth/refresh` with token rotation                |
+| Better Auth | `--auth better-auth` | [Better Auth](https://better-auth.com/docs) behind each route; needs a database |
+
+Better Auth keeps sessions in your database and answers `Authorization: Bearer <token>` for API
+clients. `/users` becomes admin-only account management with either.
+
+## API docs: `/docs`
+
+Open <http://localhost:3000/docs> while the app runs: Swagger UI for every
+route. It's built into sabit (there's no docs folder in `src/routes`) and made
+from the routes the server loaded, so a new folder or a changed `schema.ts`
+shows up as soon as `npm run dev` reloads. It shows:
+
+- every path and method, with `[id]` folders as path params;
+- request bodies from `schema.ts`;
+- a lock on routes the access list protects ("Authorize" takes a Bearer token).
+
+The raw OpenAPI 3.1 document is at `/docs/openapi.json`. Add summaries or
+hide a route with a `docs` export:
+
+```ts
+export const docs = { GET: "List products", POST: "Create a product" };
+// or: export const docs = false;
+```
+
+In production `/docs` answers 404 unless `API_DOCS=true`. The URL `/docs` is
+taken, so `src/routes/docs` isn't allowed (`npm run dev` removes a new empty
+one); nested folders such as `src/routes/products/docs` are fine.
+
 ## Commands
 
 | Command                | What it does                                  |
 | ---------------------- | --------------------------------------------- |
 | `npm run dev`          | Run with reload; new folders become endpoints |
 | `npx sabit add <name>` | Create a resource (`--no-item` skips `[id]`)  |
+| `npx sabit setup`      | Add a database, auth, services or Docker      |
 | `npx sabit watch`      | Only the folder watching, without a server    |
 | `npx sabit routes`     | List every endpoint                           |
 | `npx sabit generate`   | Rewrite `src/sabit.route.ts`                  |
 | `npm run build`        | Compile for production (`npm start` runs it)  |
+
+With a database (`npx sabit setup database`), `npm run dev` also keeps it in
+step with your schema: change `prisma/schema.prisma` or `src/db/schema.ts` and
+it writes a migration named after the change (`init`, `create_posts`,
+`add_nickname_to_users`) into `prisma/migrations/` or `drizzle/`, then applies
+it. Commit those files with the schema.
 
 ## Growing the project
 
@@ -208,16 +241,17 @@ folder that works like `routes/`: one folder per topic or queue.
 
 ## Packages
 
-| Package                                         | What it is                     |
-| ----------------------------------------------- | ------------------------------ |
-| [`create-sabit`](./packages/create-sabit)       | `npm create sabit`             |
-| [`sabit`](./packages/cli)                       | the `sabit` command            |
-| [`@sabit/router`](./packages/router)            | the routing engine             |
-| [`@sabit/schema`](./packages/schema)            | `defineSchema` for `schema.ts` |
-| [`@sabit/express`](./packages/adapters/express) | Express 5                      |
-| [`@sabit/hono`](./packages/adapters/hono)       | Hono 4                         |
-| [`@sabit/fastify`](./packages/adapters/fastify) | Fastify 5                      |
-| [`@sabit/nest`](./packages/adapters/nest)       | NestJS 12 on platform-express  |
+| Package                                               | What it is                                                                 |
+| ----------------------------------------------------- | -------------------------------------------------------------------------- |
+| [`create-sabit`](./packages/create-sabit)             | `npm create sabit`                                                         |
+| [`sabit`](./packages/cli)                             | the `sabit` command                                                        |
+| [`@sabit/router`](./packages/router)                  | the routing engine                                                         |
+| [`@sabit/schema`](./packages/schema)                  | `defineSchema` for `schema.ts`                                             |
+| [`@sabit/express`](./packages/adapters/express)       | Express 5                                                                  |
+| [`@sabit/hono`](./packages/adapters/hono)             | Hono 4                                                                     |
+| [`@sabit/fastify`](./packages/adapters/fastify)       | Fastify 5                                                                  |
+| [`@sabit/nest`](./packages/adapters/nest)             | NestJS 12 on platform-express                                              |
+| [`@sabit/adapter-common`](./packages/adapters/common) | what every adapter shares: safe 500s, rate limit, body limit, CORS origins |
 
 ## Developing sabit
 

@@ -12,7 +12,7 @@ export interface RouteMatch<R> {
   readonly params: Params;
 }
 
-/**
+/*
  * A framework-independent matcher, used for route inspection and tests. It
  * follows the same precedence adapters register routes in. Matching is
  * case-sensitive, ignores a trailing slash, and percent-decodes segments.

@@ -1,25 +1,19 @@
 import type { CatchAllKey } from "./context.ts";
 import type { Segment } from "./segments.ts";
 
-/** How a framework spells dynamic and catch-all segments. */
+/*
+ * How a framework spells segments: `param` for one dynamic segment (`:name`), `catchAll` for a one-or-more
+ * wildcard (`*name` in Express 5, `*` in Fastify), `catchAllKey` where it stores that value (default the name).
+ */
 export interface PathDialect {
-  /** A single dynamic segment, e.g. `(name) => ":" + name`. */
   param(name: string): string;
-  /** A one-or-more segment wildcard, e.g. `*name` (Express 5) or `*` (Fastify). */
   catchAll(name: string): string;
-  /** Where the framework stores a catch-all's value. Defaults to the param name. */
   catchAllKey?: CatchAllKey;
 }
 
-/**
- * Converts a route to the framework's path syntax. Optional catch-alls produce
- * two paths, one without the tail and one with it, so frameworks only need to
- * support required wildcards.
- *
- * ```ts
- * formatPaths(route, { param: (n) => `:${n}`, catchAll: (n) => `*${n}` });
- * // "/docs/[[...slug]]" -> ["/docs", "/docs/*slug"]
- * ```
+/*
+ * A route in the framework's path syntax. Optional catch-alls give two paths (without and with the
+ * tail: "/docs/[[...slug]]" → ["/docs", "/docs/*slug"]), so frameworks only need required wildcards.
  */
 export function formatPaths(
   route: { readonly segments: readonly Segment[] },

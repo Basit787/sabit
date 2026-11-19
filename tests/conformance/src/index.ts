@@ -2,24 +2,20 @@ import type { ResolvedRoute } from "@sabit/router";
 import { loadRoutes } from "@sabit/router/fs";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-/** Directory of the fixture app every adapter is tested against. */
+// Directory of the fixture app every adapter is tested against.
 export const conformanceRoutesDir = new URL("../routes", import.meta.url);
 
+// A started test server: `baseUrl` with any mount prefix and no trailing slash, and `close()`.
 export interface RunningServer {
-  /** Base URL including any mount prefix, without a trailing slash. */
   readonly baseUrl: string;
   close(): Promise<void>;
 }
 
 export type StartServer = (routes: ResolvedRoute[]) => Promise<RunningServer>;
 
-/**
- * Registers the shared behavior suite. Every adapter must pass it unchanged:
- * that is what "the same routing behavior on every framework" means.
- *
- * Status codes and bodies are asserted exactly, except where frameworks
- * legitimately own the response (404 for unknown paths, 500 for unexpected
- * errors, 400 for unparseable JSON), where only the status is checked.
+/*
+ * The behavior every adapter must pass unchanged: same routing on every framework. Statuses and bodies
+ * are exact, except where frameworks own the answer (404 unknown path, 400 bad JSON, 413 oversized).
  */
 export function runConformanceSuite(name: string, start: StartServer): void {
   describe(`${name} adapter conformance`, () => {
@@ -182,8 +178,15 @@ export function runConformanceSuite(name: string, start: StartServer): void {
         });
       });
 
-      it("hands other errors to the framework (500)", async () => {
-        expect((await request("/errors/crash")).status).toBe(500);
+      it("answers other errors with a plain 500 that never includes their message", async () => {
+        const { status, body } = await json("/errors/crash");
+        expect(status).toBe(500);
+        expect(body).toEqual({ error: { status: 500, message: "Internal Server Error" } });
+      });
+
+      it("refuses oversized bodies with 413", async () => {
+        const big = JSON.stringify({ data: "x".repeat(200 * 1024) });
+        expect((await request("/echo", send("POST", big, "application/json"))).status).toBe(413);
       });
 
       it("validates input and reports issues with 400", async () => {
@@ -213,7 +216,6 @@ export function runConformanceSuite(name: string, start: StartServer): void {
       });
 
       it("lets the most specific route claim a path for every method", async () => {
-        // /users/[id] handles DELETE, but /users/new is more specific and doesn't.
         expect((await request("/users/new", { method: "DELETE" })).status).toBe(405);
       });
 

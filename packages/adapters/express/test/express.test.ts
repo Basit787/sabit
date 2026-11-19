@@ -8,7 +8,7 @@ import {
   type RouteContext,
   resolveRoutes,
 } from "@sabit/router";
-import express, { type ErrorRequestHandler } from "express";
+import express from "express";
 import { afterEach, describe, expect, it } from "vitest";
 import { createRouter, getExpress } from "../src/index.ts";
 
@@ -65,7 +65,7 @@ describe("express adapter", () => {
     expect(await (await fetch(`${url}/ip`)).json()).toEqual({ ip: "127.0.0.1" });
   });
 
-  it("forwards unexpected errors to Express error handlers, not HttpErrors", async () => {
+  it("answers unexpected errors with a plain 500 and reports them to onError", async () => {
     const seen: unknown[] = [];
     const routes = await resolveRoutes({
       routes: [
@@ -82,16 +82,15 @@ describe("express adapter", () => {
       ],
     });
     const app = express();
-    app.use(createRouter(routes));
-    const onError: ErrorRequestHandler = (error, _req, res, _next) => {
-      seen.push(error);
-      res.status(503).json({ handled: true });
-    };
-    app.use(onError);
+    app.use(createRouter(routes, { onError: (error) => seen.push(error) }));
     const server = await listen(app);
     close = server.close;
 
-    expect((await fetch(`${server.baseUrl}/crash`)).status).toBe(503);
+    const crash = await fetch(`${server.baseUrl}/crash`);
+    expect(crash.status).toBe(500);
+    expect(await crash.json()).toEqual({
+      error: { status: 500, message: "Internal Server Error" },
+    });
     expect((await fetch(`${server.baseUrl}/missing`)).status).toBe(404);
     expect(seen.map((e) => (e as Error).message)).toEqual(["db down"]);
   });

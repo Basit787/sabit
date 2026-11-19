@@ -6,7 +6,7 @@ import type { Output } from "../src/index.ts";
 const root = fileURLToPath(new URL("./.tmp", import.meta.url));
 const created: string[] = [];
 
-/**
+/*
  * A temporary directory inside this package, so generated route files can
  * resolve `@sabit/router` through the package's node_modules.
  */

@@ -1,13 +1,18 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { Command, Output } from "../command.ts";
-import { resolveRoutesDir } from "../project.ts";
+import { dbSync, runDbSync, watchDbSync } from "../db-sync.ts";
+import { isProduction, resolveRoutesDir } from "../project.ts";
 import { startRouteWatcher } from "../route-watcher.ts";
 
-/** Entry files tried, in order, when none is given. */
+// Entry files tried, in order, when none is given.
 const DEFAULT_ENTRIES = ["src/index.ts", "src/server.ts", "src/main.ts"];
 
+/*
+ * `sabit dev`: runs migrations and generates the database client first (so the server starts on the
+ * current schema), then the server with reload and the route watcher. Refuses in production.
+ */
 export const dev: Command = {
   name: "dev",
   summary: "Run the server, restart on changes, and turn new route folders into endpoints",
@@ -32,6 +37,7 @@ export const dev: Command = {
     "no-scaffold": { type: "boolean" },
   },
   async run({ args, flags, cwd, out }) {
+    if (isProduction("dev", out)) return 1;
     const custom = flags.run as string | undefined;
     let entry: string | undefined;
     if (!custom) {
@@ -47,6 +53,10 @@ export const dev: Command = {
       }
     }
 
+    const sync = dbSync(cwd);
+    if (sync) runDbSync(cwd, sync, out);
+    const syncWatcher = sync ? watchDbSync(cwd, sync, out) : undefined;
+
     const routesDir = resolveRoutesDir(cwd, flags.routes as string | undefined);
     const watcher = await startRouteWatcher({
       cwd,
@@ -54,9 +64,6 @@ export const dev: Command = {
       out,
       scaffold: flags["no-scaffold"] !== true,
     });
-    if (flags["no-scaffold"] !== true) {
-      out.log(`Watching ${relative(cwd, routesDir) || "."}: create a folder to add endpoints.`);
-    }
 
     const child = custom
       ? spawn(custom, { cwd, stdio: "inherit", shell: true })
@@ -68,11 +75,12 @@ export const dev: Command = {
       return await waitForExit(child, out);
     } finally {
       watcher.close();
+      syncWatcher?.close();
     }
   },
 };
 
-/** Resolves with the child's exit code; Ctrl+C stops the child first. */
+// Resolves with the child's exit code; Ctrl+C stops the child first.
 function waitForExit(child: ChildProcess, out: Output): Promise<number> {
   return new Promise((resolvePromise) => {
     const stop = () => child.kill("SIGTERM");
