@@ -1,0 +1,23 @@
+name: Feature request
+description: Propose a new routing feature, adapter, or CLI capability.
+labels: [feature]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what makes it hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What should the file convention or API look like? Example route files help.
+    validations:
+      required: true
+  - type: textarea
+    id: frameworks
+    attributes:
+      label: Framework considerations
+      description: Can every adapter support this? If not, which can't, and why?

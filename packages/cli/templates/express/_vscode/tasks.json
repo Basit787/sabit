@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "sabit: turn new route folders into endpoints",
+      "detail": "Runs `sabit watch` whenever this project is opened, so creating a folder in src/routes creates its routes.",
+      "type": "shell",
+      "command": "npx sabit watch",
+      "isBackground": true,
+      "problemMatcher": [],
+      "runOptions": { "runOn": "folderOpen" },
+      "presentation": { "reveal": "silent", "panel": "dedicated", "group": "sabit" }
+    }
+  ]
+}

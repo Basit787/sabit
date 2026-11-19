@@ -1,0 +1,54 @@
+{
+  "name": "create-sabit",
+  "version": "0.0.0",
+  "description": "Create a sabit backend project: npm create sabit",
+  "license": "MIT",
+  "author": {
+    "name": "Basit Saleem",
+    "email": "basitsaleem282@gmail.com",
+    "url": "https://github.com/Basit787"
+  },
+  "homepage": "https://github.com/Basit787/backend-file-based-routing/tree/main/packages/create-sabit#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Basit787/backend-file-based-routing.git",
+    "directory": "packages/create-sabit"
+  },
+  "bugs": {
+    "url": "https://github.com/Basit787/backend-file-based-routing/issues"
+  },
+  "type": "module",
+  "keywords": [
+    "sabit",
+    "create",
+    "scaffold",
+    "express",
+    "hono",
+    "fastify",
+    "nestjs"
+  ],
+  "bin": {
+    "create-sabit": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "sabit": "workspace:^"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "typescript": "7.0.2",
+    "vitest": "5.1.1"
+  }
+}

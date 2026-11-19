@@ -1,3 +1,13 @@
 packages:
-  - "apps/*"
   - "packages/*"
+  - "packages/adapters/*"
+  - "tests/*"
+  - "examples/*"
+allowBuilds:
+  # Pulled in through tsx, an optional peer of Vite. Nothing here uses it
+  # (Vite 8 bundles with Rolldown), so its install script isn't needed.
+  esbuild: false
+minimumReleaseAgeExclude:
+  - "@vitest/mocker@5.1.1"
+  - "@vitest/spy@5.1.1"
+  - vitest@5.1.1

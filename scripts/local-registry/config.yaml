@@ -1,0 +1,36 @@
+# Verdaccio config for testing sabit locally as if it were published.
+# Used by scripts/local-registry.sh; data lives in .local-registry/ (gitignored).
+storage: ../../.local-registry/storage
+
+auth:
+  htpasswd:
+    file: ../../.local-registry/htpasswd
+    max_users: 10
+
+uplinks:
+  npmjs:
+    url: https://registry.npmjs.org/
+
+packages:
+  # sabit's own packages: only ever served from this local registry.
+  "@sabit/*":
+    access: $all
+    publish: $authenticated
+    unpublish: $authenticated
+  "sabit":
+    access: $all
+    publish: $authenticated
+    unpublish: $authenticated
+  "create-sabit":
+    access: $all
+    publish: $authenticated
+    unpublish: $authenticated
+  # Everything else (express, hono, ...) comes from npmjs.
+  "**":
+    access: $all
+    proxy: npmjs
+
+log:
+  type: stdout
+  format: pretty
+  level: warn

@@ -1,0 +1,464 @@
+# Bootstrap prompt — generate a project's `.claude/` setup from its code
+
+Paste this whole file as one message into Claude Code at the root of any
+project: backend, frontend, mobile, full-stack workspace, infra, data pipeline,
+library. It scans the project and writes its `.claude/` setup: settings,
+CLAUDE.md, rules, skills, agents and lessons. Nothing below is specific to one
+project. Everything specific is found by scanning, never assumed.
+
+---
+
+## Your task
+
+Scan this project and generate a complete `.claude/` setup for it. Work through
+the steps in order. Do not stop for confirmation between steps. Do all of it,
+then stop.
+
+Standing constraints on everything you do and write:
+
+1. **Grounded.** Every path, command and convention comes from something you
+   opened or ran. If you did not verify it, leave it out.
+2. **Cheap.** These files load on every future turn. Say each thing once, and
+   keep it short.
+3. **Local only.** Write only under `.claude/`. Never `git add`, `git commit`,
+   `git push`, open a PR, merge, tag, install a dependency, or run a build,
+   release or deploy script. The user commits and pushes by hand.
+4. **Silent.** Write no text between tool calls, and do not summarise at the end.
+
+---
+
+## Step 0 — Work out what kind of project this is
+
+Establish it from evidence at the root: manifests, lockfiles, config files, CI,
+container files, directory names, README. Do not guess from the folder name.
+
+Note for yourself what it *is* (backend API, frontend web app, mobile app,
+monorepo or workspace, infra, data, library), what it *produces*, and who
+consumes that. For a workspace holding several projects, list each project's
+root and kind. Each one gets its own conventions file in Step 4.
+
+---
+
+## Step 1 — Scan (read, do not write yet)
+
+1. **How it runs.** Find the real commands for dev/serve, build, test, lint,
+   typecheck and release/deploy. Flag any command that looks obvious but is
+   wrong here: a binary not on PATH, a decoy package in `node_modules/.bin`, a
+   lint that runs `--fix` and rewrites files, a required heap-size env var, a
+   build that writes into a served folder. Release and deploy scripts go into
+   `deny`.
+2. **Layout.** List the source root and each main directory. Name the layers
+   using the project's own vocabulary:
+   - backend: routes/controllers, services, models or data access, middleware,
+     jobs, views;
+   - frontend: pages/screens/routes, components, services or API clients,
+     state/store, models/types, guards, styles;
+   - infra: modules, environments, pipelines.
+
+   For each layer, note the file-naming convention, including old-vs-new
+   inconsistencies.
+3. **House shape.** Open ONE representative file per layer and read the whole
+   file. Capture:
+   - how a unit is declared;
+   - how dependencies arrive;
+   - the success/error envelope;
+   - what a public signature looks like;
+   - indent, quotes, semicolons, import grouping;
+   - how dense the comments are.
+4. **Trust boundary.**
+   - Backend: every auth guard, what each one populates, and where resource
+     ownership is checked, including the helper that does it.
+   - Frontend: where the token is stored, how it gets attached (interceptor or
+     API wrapper), and the route guards. A client-side check is never the
+     security boundary.
+   - Infra: credentials, roles and blast radius.
+5. **Shared state and contracts.**
+   - Data access: is there a shared helper layer, or are queries inline? Note
+     soft-delete flags, timestamp fields, ID conventions and read-replica
+     staleness.
+   - Frontend: the one HTTP wrapper, the base URLs, and the models that mirror
+     server replies.
+   - Any key that must exist in two places, such as a permission key in both
+     the client and the server.
+6. **Traps.** Look for things that silently go wrong:
+   - generated or build output;
+   - stale output left behind by deleted sources;
+   - glob auto-registration;
+   - caches;
+   - an env-selection file;
+   - files holding secrets, whose values must never be echoed.
+7. **Ignore set.** Read `.gitignore` and add what you saw: build output,
+   dependencies, lockfiles, secrets, coverage, minified or vendored assets.
+8. **Git.** Run `git log --oneline -15`, find the default branch, and check
+   whether `.claude/` is gitignored.
+9. **Existing agent config.** Look for `CLAUDE.md`, `.claude/`, `AGENTS.md`,
+   `.cursorrules` and `CONTRIBUTING`. If `.claude/` already exists, UPDATE it in
+   place: keep the existing rules and their IDs, and add only what is missing.
+   Never renumber or overwrite.
+
+Read regions, not whole files: find the line with `grep -n`, then read around
+it with `sed -n 'A,Bp'`. Never read dependency, build or vendored directories.
+Batch independent calls into one message.
+
+---
+
+## Step 2 — Write `.claude/settings.json`
+
+It must be valid against the Claude Code settings schema, with
+`"$schema": "https://json.schemastore.org/claude-code-settings.json"`.
+
+- **`permissions.defaultMode`:** set to `"acceptEdits"`.
+- **`permissions.allow`:**
+  - `Read`, `Glob`, `Grep`;
+  - read-only shell: `ls`, `cat`, `head`, `tail`, `sed -n`, `wc`, `grep`, `rg`,
+    `find`, `jq`;
+  - read-only git: `status`, `diff`, `log`, `show`, `branch`, `stash list`;
+  - the project's runner (`npm run:*`, `make:*`, or whatever is used) and the
+    exact typecheck/test command found in Step 1;
+  - `Edit`/`Write` scoped to the hand-authored source directories and
+    `.claude/**`.
+- **`permissions.deny`:**
+  - reads AND edits of build output, the dependency directory, `.git`, the
+    lockfile, `.env*`, keys (`*.pem`, `*.p12`, `*.key`) and minified or vendored
+    assets;
+  - `git commit`, `git push`, `git reset --hard`, `git clean`, `git rebase`;
+  - publish commands, and the project's release and deploy scripts.
+- **`permissions.ask`:** `git add`, `git checkout`, `git switch`, `git merge`,
+  `git stash` (except `list`), and dependency install/uninstall.
+- **`env`:** only what the toolchain genuinely needs, such as a compiler heap
+  size.
+- **Other keys:** `"respectGitignore": true` and `"todoFeatureEnabled": false`.
+- **Hooks:** one `SessionStart` hook whose `command` prints a single JSON
+  object:
+  `{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"..."}}`.
+  Its context is ONE line that says:
+  - START: do the asked change directly, using grep to locate and `sed -n` to
+    read;
+  - IGNORE: <this project's ignore set>;
+  - NEVER: commit or push;
+  - STOP: when the asked change is made, with no extra files, docs or follow-up.
+
+To validate, `jq -e . .claude/settings.json` must exit 0, and piping `{}` into
+the hook command must produce parseable JSON.
+
+---
+
+## Step 3 — Write `.claude/CLAUDE.md`
+
+Keep it short, because it loads on every turn.
+
+    # <project name>
+    <two lines: stack, entry point, how to run it>
+
+    ## Project rules
+    <one line: these are instructions, not background>
+    @rules/00-working-agreement.md
+    @rules/10-<domain>-conventions.md
+    @rules/20-docs-and-requirements.md
+    @rules/30-new-<unit>-scaffold.md
+
+    ## How to work here, in one line
+    Do exactly what was asked, in those files, nothing else (W1, W3, W10);
+    fewest tokens (W11); no preamble, a one-or-two-line close (W12); never
+    commit or push (W22).
+
+    ## Keeping the rules current
+    - A durable rule from the user ("always/never", "from now on", "remember",
+      a correction meant to stick) → invoke `add-rule` in the same turn. Never
+      hand-edit the rules files.
+    - `feature-requirement` only when a requirement or plan is explicitly
+      asked for — never because the work looks large.
+
+For a workspace, write one `CLAUDE.md` at the workspace root that lists each
+project, then import one conventions file per project (for example
+`10-backend-conventions.md` with `C#` and `40-client-conventions.md` with `A#`)
+and say which file applies where. Import paths are relative to `CLAUDE.md`. A
+rules file that is not imported is never read, so check that every import
+resolves.
+
+---
+
+## Step 4 — Write `.claude/rules/`
+
+Every rule has three parts:
+
+- a heading, `### <ID> <short imperative title>`;
+- the rule, in one or two sentences;
+- a `Why:` line naming the concrete thing that goes wrong without it.
+
+Split any rule that grows past a short paragraph.
+
+### `00-working-agreement.md` — IDs `W#`
+
+This file is the same in every project. Keep these IDs and this order, so that
+a `W` number means the same thing everywhere:
+
+- **W1 Do exactly what was asked.** No extra edits, files, docs, tests or
+  refactors. Create a new file only when one was asked for. If something else
+  looks wrong, say so in one sentence and leave it alone.
+- **W2 The external contract never changes in a refactor.** This covers routes,
+  methods, guards, request and response shapes, status codes, shared-component
+  inputs and outputs, CLI flags and resource names.
+- **W3 Minimal diff.** No renames, reformatting, reordering or new dependencies.
+- **W4 Merge duplicated logic.** Duplicated logic gets one definition. This
+  matters most for auth and ownership checks, where two copies will drift.
+- **W5 Verify with something runnable.** Name the check that was run.
+- **W6 Compare against the default branch before calling it done.** Run
+  `git diff <default> --stat`, then look for imports of deleted files, comments
+  pointing at deleted code, and non-additive changes to shared code. Do this
+  silently and report only what it finds.
+- **W7 Deleting a source also means deleting its stale build output.** Include
+  this only if Step 1 found a build that does not clean up after itself, or glob
+  auto-registration.
+- **W8 Report honestly, and only the exceptions:** a failed check (with its
+  output), something skipped, an assumption made, or a blocking question.
+- **W9 No subagents or workflows unless asked.** The agents from Step 6 run only
+  on their trigger words.
+- **W10 No plan, requirement, summary or report file unless asked.**
+- **W11 Spend the fewest tokens that still get it right.** Grep to locate, read
+  the region rather than the file, never re-read a file you just edited, never
+  re-search something already established, and batch independent calls.
+- **W12 No preamble; close in one or two lines.** Start immediately. The
+  closing summary is at most two lines: what changed, and anything the user
+  must do by hand. That cap is hard. No per-file breakdown, no narrated checks,
+  no suggestions, no next steps.
+- **W13 "Debug" means find it and fix it in the same turn.** Do not stop at a
+  diagnosis.
+- **W14 Some phrases trigger a deep evidence pass.** Examples: "debug this
+  application", "generate the report/preview", "give me the result". A
+  report-style trigger produces findings only and changes no code.
+- **W15 A pasted curl or payload is a go-ahead.** When it is for a feature that
+  already has a `claude/<feature>/` folder, amend the docs and then write the
+  code, all in one turn.
+- **W16 "Remove / update / add this" is the whole job.** Make the edit, fix the
+  imports and callers it breaks, typecheck, and stop. No doc edits.
+- **W17 Write the simplest version that fits the file, and think one step
+  ahead.** Watch for data formats that never match what is stored, triggers on
+  a function shared with the opposite case, an extra read per row inside a
+  batch, and values that are undefined on another path. If a real risk remains,
+  say it in one sentence.
+- **W18 Answering "Completed" / "what's today's task?".** Reply with the
+  heading `*Completed:*-`, followed by a numbered list of `N. *item*` lines: one
+  bold line per topic, with no detail, no paths and no next steps.
+- **W19 Say nothing between tool calls.** This holds even in the IDE's Focus
+  view.
+- **W20 Implement from what the repo already does, never from memory.** First
+  search for the nearest existing equivalent and reuse its helpers, call shape
+  and field names. Never invent anything, and never leave a feature half-wired.
+- **W21 A cosmetic tweak is one edit.** No rebuild, render or screenshot unless
+  the change is structural or a render was asked for.
+- **W22 Never commit, push, open a PR, merge, rebase, tag, publish, release or
+  deploy.** The user does all of that. A finished task is not a reason to
+  commit.
+
+After these, add any working rule specific to this project that the scan turned
+up, starting at `W23`.
+
+### `10-<domain>-conventions.md` — IDs `C#` (use `A#` for a second project)
+
+Include only facts verified in Step 1. Cover whichever of these apply:
+
+- **Layer split.** The routing/layering split and what may live in each layer.
+  Controllers or pages stay thin, logic goes in services, and data access goes
+  through the shared helpers only.
+- **Auth guards.** Each guard and what it populates. If a unit mixes guards, it
+  has no class-level guard and every action names its own; an action without
+  one is public.
+- **Ownership.** Ownership is checked in one shared helper. Never trust a
+  client-sent ID.
+- **Comments (hard cap).** At most two lines, only where the code is not
+  self-evident. No JSDoc or block headers on anything. Reasoning that needs
+  more than two lines goes in the feature's `implementation.md`. Existing long
+  comments stay as they are, and new comments do not copy them.
+- **Compiler gotchas.** Take these from the real config, for example: with
+  `strict` off, discriminated unions do not narrow.
+- **Typecheck.** Give the exact command and why the obvious one fails. Run it
+  once, at the end of the change, and say nothing if it passes.
+- **Background jobs.** If found: background or cron work starts without `await`
+  and the request answers immediately.
+- **Build output.** Never read, write or scan build output, and never run the
+  scripts that write into it.
+- **Short, plain code.** Never invent an API field, header, enum value or
+  template ID that the code or docs do not show.
+- **Sibling calls.** A call added beside an existing one copies that call:
+  same arguments, same await style, same formatting, with no extra locals or
+  logging.
+- **Shared guards.** Never edit the shared guard, middleware or interceptor for
+  a feature. Repeat the few lines needed inside the feature instead.
+- **Frontend projects, additionally:**
+  - component/module style (standalone vs module, function vs class);
+  - routing and lazy loading;
+  - HTTP goes through the one wrapper;
+  - tokens come from storage and the server decides; guards only decide what
+    renders;
+  - a permission key has to live in every place it lives;
+  - models mirror the server reply and never gain fields the server does not
+    return;
+  - the typecheck command, and what it does not cover (templates);
+  - formatting;
+  - generated directories and env files that must never be read or echoed.
+
+### `20-docs-and-requirements.md` — IDs `D#`
+
+This file governs the `claude/<feature>/` docs:
+
+- **D1** `requirement.txt` and `implementation.md` are lint-clean markdown:
+  blank lines around headings, lists, tables and fences; a language on every
+  fence; aligned table pipes; no trailing spaces; one final newline.
+- **D2** When an API is added or changed, the feature's docs are amended in the
+  same turn. Deletions are exempt (W16).
+- **D3** Every requirement is one yes/no statement.
+- **D4** `implementation.md` opens with a status line.
+- **D5** Never paste the prompt into a doc. `## Task` restates the ask neutrally
+  in your own words.
+
+### `30-new-<unit>-scaffold.md` — IDs `S#`
+
+This covers what to produce when asked to create a new one of this project's
+units of work: an endpoint, a screen, a component, a module or a job. Write one
+rule per layer, each with a short fenced skeleton copied from the representative
+file read in Step 1.3:
+
+- **S1** Which files to create and how they are named. Create only the layers
+  the feature needs, with no registration step if a glob picks the file up.
+- **S2** The entry shape (controller, page or component): declaration,
+  dependency injection, and one guard clause per required input. Never throw
+  for bad input.
+- **S3** The logic-layer shape: a single object parameter, a typed result, and
+  no inline queries.
+- **S4** The data-layer shape, including its mandatory filters (such as
+  soft-delete) and exported query helpers.
+- **S5** Timestamps and soft-delete handling on insert, update and delete.
+- **S6** Auth is declared explicitly, and ownership is resolved from the token.
+- **S7** Formatting matches the neighbours exactly. No new dependency, folder,
+  barrel/index file, test or README unless asked.
+
+---
+
+## Step 5 — Write `.claude/skills/`
+
+Each skill is `.claude/skills/<name>/SKILL.md` with this frontmatter:
+
+    ---
+    name: <kebab-case>
+    description: <one line — when to use it; until it loads, this is all that is seen>
+    ---
+
+- **`add-rule`** — persist a durable instruction into `.claude/rules/`.
+  1. Restate it in one sentence, and ask if two readings would behave
+     differently.
+  2. Pick the file by what the rule governs. If none fits, create a new
+     `NN-<topic>.md` with its own ID letter AND add its `@` import to
+     `CLAUDE.md`.
+  3. Read that file. If a near-duplicate exists, UPDATE it rather than
+     appending. If the new rule contradicts an existing one, say so and ask
+     which wins.
+  4. Write it with the next free ID, in the house format, with a `Why:`.
+     Capture the general rule, not the incident.
+  5. Name the file and ID back in one line.
+- **`strict-execution`** — for a small, unambiguous ask: minimum reasoning,
+  tool calls and output. Read only the needed region, edit, and stop silently.
+  Never claim something was tested when it was not.
+- **`token-budget`** — how to locate code cheaply IN THIS PROJECT, using the
+  real naming patterns from Step 1.2 with grep → `grep -n` → `sed -n`.
+  - Cheap by default: batch calls, `| head`, `diff --stat` before `diff`, no
+    re-reads, typecheck once.
+  - Never spend tokens on: unrelated files, subagents, docs, or narration.
+  - Spend freely on: the trust boundary, the external contract, and
+    verification.
+- **`feature-requirement`** — the plan-to-code sequence, and ONLY when a
+  requirement or plan is explicitly asked for.
+  - Order: `claude/<feature>/requirement.txt` first, then STOP. After approval,
+    `implementation.md`, then STOP. Code only on an explicit go-ahead.
+  - Check `claude/` for an existing folder first.
+  - `requirement.txt` sections, in order: Task (neutral wording), Objective, one
+    heading per Scenario, Requirements R1..Rn, Constraints / Non-goals,
+    Decisions, Verification.
+  - Exceptions: a curl added to a feature that already has a folder (W15), and
+    deletions (W16).
+
+If the scan found a new-unit chore that touches several places — for example, a
+new screen that needs a folder, a lazy route, a permission key in two
+registries, a service call and a model — add one more skill for it, built from
+the real reference unit, named after it (for example `new-panel-screen`).
+
+---
+
+## Step 6 — Write `.claude/agents/`
+
+Each agent is `.claude/agents/<name>.md` with frontmatter `name`, `description`
+and `tools`. Agents run only when the user says their trigger word (W9).
+
+- **`debug`** — tools: Read, Grep, Glob, Bash, Edit, Write. Triggers on
+  "debug", a pasted error or log, or "why did this happen".
+  1. State the expected behaviour in one line.
+  2. Trace the real call chain.
+  3. Get the real data.
+     - Backend: run a READ-ONLY query using the connection config the project
+       already has. Name where that config lives and which database or schema
+       holds the data. Never write or migrate, project only the needed fields,
+       use `.limit()`, and never print secrets.
+     - Frontend: use the dev server, the console and the network payload.
+  4. Prove the cause with one piece of evidence per claim.
+  5. Fix it narrowly.
+  6. Re-run the typecheck and the check that showed the problem.
+  7. Hand back a `Problem / Cause / Evidence / Fix / Verified` block with the
+     actual values.
+- **`review`** — tools: Read, Grep, Glob, Bash, Edit, Write. Triggers on
+  "review".
+  - Target: the working tree against the default branch, with the rules files
+    as criteria.
+  - Order: correctness → contract breaks → rule breaks (cited by ID) → dead
+    weight.
+  - Every issue needs evidence. Drop anything you cannot show.
+  - Report each issue as `### n. claim · file:line`, then What happens,
+    Evidence and Fix. Apply the fixes, re-run the typecheck, and add one line
+    per issue saying fixed or skipped. Never write a report file.
+- **Workspaces with a client and a server only:**
+  - a read-only `api-contract-tracer`, which checks one endpoint's client call
+    and model against the server action, guard and reply, and reports each
+    mismatch;
+  - a read-only `rules-reviewer`, which checks the diff against the rules and
+    outputs `ID — file:line — what breaks it` per violation.
+
+---
+
+## Step 7 — Write `.claude/lessons.md`
+
+This file is for the human, not the model: how to phrase an ask so it lands in
+seconds. Include:
+
+- Where the time actually goes, in order: finding the file, reading whole files,
+  permission prompts, unasked-for work, long summaries.
+- A `| Instead of | Say |` table with three examples that use real paths from
+  THIS project.
+- Ask templates that work here, for example
+  `in <file>: <change>` and `<file>:<line> — wrong → right`.
+- Phrases that make it slower, and why.
+- When to ask for the slow path explicitly: check every caller, run the
+  typecheck, compare against the default branch, write the requirement first.
+- A table of skills and agents with when to invoke each.
+- What each `settings.json` choice buys, in plain terms, including that commit
+  and push are denied and left to the user.
+- A short pre-send checklist.
+
+Keep the markdown clean: every fenced block carries a language tag, and table
+separators are `| --- | --- |`.
+
+---
+
+## Step 8 — Verify, then stop
+
+- `jq -e . .claude/settings.json` exits 0, and the hook command pipe-tests to
+  valid JSON.
+- Every `@rules/...` import in `CLAUDE.md` resolves to a file that exists.
+- Every skill and agent has frontmatter with `name` and `description`, and
+  agents also have `tools`.
+- Every rule ID cited anywhere in `.claude/` exists in a rules file.
+- No rule cites a path, command or flag that Step 1 did not verify.
+- `git status --short` shows changes only under `.claude/`, with nothing staged
+  and nothing committed.
+- Say in one line whether `.claude/` is gitignored. That decides whether this
+  setup is shared with the team or stays local.
+
+Then stop. Close in at most two lines, and do not commit.

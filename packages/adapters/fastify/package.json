@@ -1,0 +1,62 @@
+{
+  "name": "@sabit/fastify",
+  "version": "0.0.0",
+  "description": "Fastify 5 adapter for sabit file-based routing.",
+  "license": "MIT",
+  "author": {
+    "name": "Basit Saleem",
+    "email": "basitsaleem282@gmail.com",
+    "url": "https://github.com/Basit787"
+  },
+  "homepage": "https://github.com/Basit787/backend-file-based-routing/tree/main/packages/adapters/fastify#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Basit787/backend-file-based-routing.git",
+    "directory": "packages/adapters/fastify"
+  },
+  "bugs": {
+    "url": "https://github.com/Basit787/backend-file-based-routing/issues"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "keywords": [
+    "sabit",
+    "router",
+    "file-based-routing",
+    "fastify"
+  ],
+  "exports": {
+    ".": {
+      "@sabit/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sabit/router": "workspace:^"
+  },
+  "peerDependencies": {
+    "fastify": "^5.0.0"
+  },
+  "devDependencies": {
+    "@sabit/conformance": "workspace:*",
+    "@types/node": "^24.19.2",
+    "fastify": "5.12.8",
+    "typescript": "7.0.2",
+    "vitest": "5.1.1"
+  }
+}

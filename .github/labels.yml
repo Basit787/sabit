@@ -1,0 +1,9 @@
+# Synced with scripts/sync-labels.sh (requires the GitHub CLI).
+- { name: bug, color: d73a4a, description: "Something isn't working" }
+- { name: feature, color: a2eeef, description: "New feature or request" }
+- { name: documentation, color: 0075ca, description: "Docs, examples, guides" }
+- { name: good first issue, color: 7057ff, description: "Good for newcomers" }
+- { name: help wanted, color: 008672, description: "Extra attention is needed" }
+- { name: core, color: 5319e7, description: "@sabit/router" }
+- { name: adapter, color: fbca04, description: "Framework adapters" }
+- { name: cli, color: 1d76db, description: "sabit CLI and create-sabit" }

@@ -1,0 +1,63 @@
+{
+  "name": "@sabit/hono",
+  "version": "0.0.0",
+  "description": "Hono adapter for sabit file-based routing.",
+  "license": "MIT",
+  "author": {
+    "name": "Basit Saleem",
+    "email": "basitsaleem282@gmail.com",
+    "url": "https://github.com/Basit787"
+  },
+  "homepage": "https://github.com/Basit787/backend-file-based-routing/tree/main/packages/adapters/hono#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Basit787/backend-file-based-routing.git",
+    "directory": "packages/adapters/hono"
+  },
+  "bugs": {
+    "url": "https://github.com/Basit787/backend-file-based-routing/issues"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "keywords": [
+    "sabit",
+    "router",
+    "file-based-routing",
+    "hono"
+  ],
+  "exports": {
+    ".": {
+      "@sabit/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\" && tsc -p tsconfig.build.json",
+    "dev": "tsc -p tsconfig.build.json --watch --preserveWatchOutput",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@sabit/router": "workspace:^"
+  },
+  "peerDependencies": {
+    "hono": "^4.6.0"
+  },
+  "devDependencies": {
+    "@hono/node-server": "2.1.9",
+    "@sabit/conformance": "workspace:*",
+    "@types/node": "^24.19.2",
+    "hono": "4.13.19",
+    "typescript": "7.0.2",
+    "vitest": "5.1.1"
+  }
+}
